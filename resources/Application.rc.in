@@ -1,0 +1,39 @@
+// Windows 资源脚本：给 exe 挂图标 + 版本信息。
+// windres 的相对路径是相对**编译时的工作目录**（CMake build/），不是本文件
+// 所在目录——用绝对路径避免因构建目录变了就找不到图标。路径必须是正斜杠：
+// CMAKE_SOURCE_DIR 在 Windows 上是反斜杠，windres 解析 rc 字符串时会把
+// \A \r 当转义序列吃掉，所以 CMakeLists.txt 里转成 SOURCE_DIR_FWDSLASH 再填。
+//
+// 这是 configure_file 生成的产物（@VERSION_XXX@ 占位符被 CMake 替换）——
+// 版本号唯一来源仍是 CMakeLists.txt 的 project(VERSION)，不在这里手改。
+IDI_ICON1 ICON "@SOURCE_DIR_FWDSLASH@/resources/Application.ico"
+
+#include <winver.h>
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION @PROJECT_VERSION_MAJOR@,@PROJECT_VERSION_MINOR@,@PROJECT_VERSION_PATCH@,0
+ PRODUCTVERSION @PROJECT_VERSION_MAJOR@,@PROJECT_VERSION_MINOR@,@PROJECT_VERSION_PATCH@,0
+ FILEFLAGSMASK 0x3fL
+ FILEFLAGS 0x0L
+ FILEOS 0x40004L
+ FILETYPE 0x1L
+ FILESUBTYPE 0x0L
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904b0"
+        BEGIN
+            VALUE "CompanyName", "Tenda"
+            VALUE "FileDescription", "CS7G Production Test Tool"
+            VALUE "FileVersion", "@PROJECT_VERSION@"
+            VALUE "InternalName", "ProductTestTool"
+            VALUE "OriginalFilename", "ProductTestTool.exe"
+            VALUE "ProductName", "Production Test Tool"
+            VALUE "ProductVersion", "@PROJECT_VERSION@"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END

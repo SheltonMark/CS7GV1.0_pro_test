@@ -5,7 +5,7 @@ cmake_minimum_required(VERSION 3.21)
 #
 # 版本号是产线工具的硬要求：界面要看得到，将来每条产测记录也要带上它，
 # 否则批量误判无法追溯是哪个版本干的。此处是唯一来源。
-project(ptest_pc_client VERSION 0.1.4 LANGUAGES CXX)
+project(ptest_pc_client VERSION 0.1.5 LANGUAGES CXX)
 
 find_package(Qt6 6.7 REQUIRED COMPONENTS Quick QuickControls2)
 
@@ -15,7 +15,18 @@ qt_standard_project_setup(REQUIRES 6.7)
 # 编译器 locale、格式不稳，且增量构建时可能不刷新。
 string(TIMESTAMP BUILD_DATE "%Y-%m-%d" UTC)
 
-qt_add_executable(app_ptest src/main.cpp)
+# exe 图标 + 版本资源。configure_file 把 project(VERSION) 的三段号填进
+# Application.rc.in 生成真正的 .rc；版本号唯一来源仍是上面的 project()，
+# 这里只是转译格式，不重复定义。
+# CMAKE_SOURCE_DIR 在 Windows 上是反斜杠路径，windres 解析 rc 里的字符串
+# 会把 \A \r 等当转义序列吃掉——转成正斜杠再喂给 configure_file。
+file(TO_CMAKE_PATH "${CMAKE_SOURCE_DIR}" SOURCE_DIR_FWDSLASH)
+configure_file(
+    ${CMAKE_SOURCE_DIR}/resources/Application.rc.in
+    ${CMAKE_BINARY_DIR}/Application.rc
+    @ONLY)
+
+qt_add_executable(app_ptest src/main.cpp ${CMAKE_BINARY_DIR}/Application.rc)
 
 # ⚠️ src/ 必须进包含路径。qt_add_qml_module 生成的类型注册文件用
 # `#if __has_include(<file_io.hpp>)` 尖括号查找带 QML_ELEMENT 的头，

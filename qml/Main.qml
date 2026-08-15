@@ -11,11 +11,10 @@ ApplicationWindow {
     minimumWidth: 1180
     minimumHeight: 720
     visible: true
-    // 产线工位机默认全屏——产线显示器分辨率不固定，全屏保证布局不被裁剪。
-    // 开发联调时带 --page N 参数不影响全屏；如需窗口模式在启动脚本里加 --no-fullscreen。
-    visibility: Qt.application.arguments.indexOf("--no-fullscreen") >= 0
-                ? Window.Maximized : Window.FullScreen
-    title: "产测工具"
+    // 最大化启动：保留系统标题栏（含最小化/最大化/关闭按钮），同时撑满屏幕。
+    // FullScreen 会隐藏系统标题栏，工人找不到关闭按钮。
+    visibility: Window.Maximized
+    title: "产测软件 v" + (typeof appVersion !== "undefined" ? appVersion : "dev")
     color: Theme.bg
 
     // 必须显式钉强调色。FluentWinUI3 默认跟随 Windows 系统强调色 ——
