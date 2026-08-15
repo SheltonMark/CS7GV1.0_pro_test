@@ -34,9 +34,10 @@ QtObject {
 
     // ---- 负责人(关于页) ----
     // 假数据。真实工号要从产线台账拿。
+    // ⚠️ 工号 0038165 必须是字符串。前导零一旦被当数字处理就会丢成 38165，
+    //    将来若导出到 Excel/CSV 也是同一个坑(Excel 默认按数字解析、吃掉前导零)。
     readonly property var owners: [
-        { name: "马顺涛", role: "固件 / 产测协议", wecom: "mashuntao" },
-        { name: "（待填）", role: "产线对接",       wecom: "tbd" }
+        { name: "肖洁", role: "负责人", wecom: "0038165" }
     ]
 
     // ---- 11 项测试项主表 ----
