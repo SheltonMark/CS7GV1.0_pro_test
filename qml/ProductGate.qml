@@ -118,8 +118,11 @@ Item {
                             }
                         }
                         Text {
+                            // 工位数也列出来:不同产品工艺路线不同(射频线多三站),
+                            // 选产品时就能看出差异,不用进去才发现。
                             text: card.usable
                                   ? "ProductId  " + card.modelData.productId
+                                    + "   ·   工位 " + card.modelData.stations.length + " 站"
                                     + "   ·   测试项 " + card.modelData.items.length + " 项"
                                   : "ProductId  （待建模）"
                             color: Theme.textDim

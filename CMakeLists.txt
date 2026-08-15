@@ -54,6 +54,7 @@ qt_add_qml_module(app_ptest
         qml/AppButton.qml
         qml/Card.qml
         qml/ConfirmDialog.qml
+        qml/ManualVerifyPanel.qml
         qml/FieldRow.qml
         qml/TestItemRow.qml
         qml/ResultBanner.qml
@@ -65,6 +66,7 @@ qt_add_qml_module(app_ptest
         qml/ViewFinished.qml
         qml/ViewInspect.qml
         qml/ViewRepair.qml
+        qml/ViewPending.qml
         qml/ViewAbout.qml
         qml/ProductGate.qml
         qml/ViewLogin.qml

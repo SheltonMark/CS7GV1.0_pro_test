@@ -5,6 +5,12 @@ import QtQuick.Layouts
 
 // 调焦工位 —— 画面是主角,占最大面积。无尘室里工人边转镜头边看这一屏。
 Item {
+    id: root
+
+    // 画面人工判定:undefined 未判 / true 清晰 / false 不合格。
+    // 写标识按钮以此为门 —— 没判过不许写(否则等于没测就盖章)。
+    property var imageOk: undefined
+
     ConfirmDialog { id: confirm }
 
     RowLayout {
@@ -125,6 +131,8 @@ Item {
                     glyph: Icons.save
                     kind: "primary"
                     Layout.preferredWidth: 204
+                    // 画面未判定或判为不合格 → 不许写标识
+                    enabled: root.imageOk === true
                     // 写设备状态 → 必须确认(误触=台账里多一条错误时间戳)
                     onClicked: confirm.ask("写入调焦标识？",
                         "将向设备写入调焦完成时间戳（Stage=1，只增不覆盖）。",
@@ -143,13 +151,18 @@ Item {
             ResultBanner {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 160
-                state_: "idle"
-                caption: "等待画面确认"
+                state_: root.imageOk === undefined ? "idle"
+                        : (root.imageOk ? "pass" : "fail")
+                caption: root.imageOk === undefined ? "等待画面确认"
+                         : (root.imageOk ? "画面清晰，可写标识" : "画面不合格，转返修")
             }
 
+            // 调焦工位的核心判定就是"画面清不清晰",而这只能人工看。
+            // 咪头判定已移到成品页与喇叭合并(一步双验) —— 咪头和喇叭同工位
+            // 才能一个动作验完两项;且无尘室噪音大,声音判定不宜放这里。
             Card {
-                title: "咪头  ·  人工判定"
-                titleIcon: Icons.mic
+                title: "画面  ·  人工判定"
+                titleIcon: Icons.navFocus
                 fitContent: true
                 Layout.fillWidth: true
 
@@ -159,7 +172,7 @@ Item {
 
                     Text {
                         width: parent.width
-                        text: "对着设备说话，能从电脑听到声音即通过。"
+                        text: "转动镜头至画面最清晰，确认无偏色、无暗角、无异物后判定。"
                         color: Theme.textSecondary
                         font.family: TypeScale.family
                         font.pointSize: TypeScale.body
@@ -168,18 +181,24 @@ Item {
 
                     Row {
                         spacing: Theme.s3
-                        // 人工判定 → 确认(这一下就是咪头项的最终结论,误触即错判)
+                        // 人工判定 = 终局结论,两个方向都要确认
                         AppButton {
-                            text: "听到了"; glyph: Icons.pass; kind: "primary"; width: 116
-                            onClicked: confirm.ask("咪头判定：通过？",
-                                "确认从电脑听到了设备咪头采集的声音，该项记为通过。",
-                                function () { /* 真实实现:记录咪头=通过 */ })
+                            text: "清晰"
+                            glyph: Icons.pass
+                            kind: root.imageOk === true ? "primary" : "normal"
+                            width: 116
+                            onClicked: confirm.ask("画面判定：清晰？",
+                                "确认画面已调至最清晰，该工位可写调焦标识。",
+                                function () { root.imageOk = true })
                         }
                         AppButton {
-                            text: "没听到"; glyph: Icons.fail; width: 116
-                            onClicked: confirm.ask("咪头判定：不通过？",
-                                "该项将记为失败，设备转维修排查咪头。",
-                                function () { /* 真实实现:记录咪头=失败 */ })
+                            text: "不合格"
+                            glyph: Icons.fail
+                            kind: root.imageOk === false ? "danger" : "normal"
+                            width: 116
+                            onClicked: confirm.ask("画面判定：不合格？",
+                                "该设备记为调焦不合格并转返修。",
+                                function () { root.imageOk = false })
                         }
                     }
                 }

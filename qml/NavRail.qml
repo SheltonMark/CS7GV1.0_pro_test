@@ -7,14 +7,38 @@ Rectangle {
     id: rail
 
     property int currentIndex: 0
-    readonly property var entries: [
-        { key: "调焦",   sub: "工位 1", icon: Icons.navFocus },
-        { key: "准成品", sub: "工位 2", icon: Icons.navSemi },
-        { key: "成品",   sub: "工位 2", icon: Icons.navFinished },
-        { key: "检查",   sub: "工位 3", icon: Icons.navInspect },
-        { key: "维修",   sub: "按需",   icon: Icons.navRepair },
-        { key: "关于",   sub: "版本",   icon: Icons.navAbout }
-    ]
+
+    // 工位表由当前产品的 profile 决定 —— 不同产品工艺路线不同（射频类产品
+    // 多流量/射频/耦合三站且不做调焦）。关于页与工位无关，恒定追加在末尾。
+    // 图标按 station.key 查表；pending 站点用统一的"待实现"图标并置灰。
+    readonly property var stations: Session.profile && Session.profile.stations
+                                    ? Session.profile.stations : []
+
+    readonly property var entries: {
+        var out = [];
+        for (var i = 0; i < stations.length; ++i) {
+            var s = stations[i];
+            out.push({ key: s.title, sub: s.sub, icon: iconFor(s.key),
+                       pending: s.pending === true });
+        }
+        out.push({ key: "关于", sub: "版本", icon: Icons.navAbout, pending: false });
+        return out;
+    }
+
+    // 坑 2:单例属性初始化不能调自定义函数 —— 此处 rail 是普通组件不是单例，
+    // 且 entries 是绑定表达式而非单例属性初始化，安全。
+    function iconFor(key) {
+        switch (key) {
+        case "focus":    return Icons.navFocus;
+        case "semi":     return Icons.navSemi;
+        case "finished": return Icons.navFinished;
+        case "inspect":  return Icons.navInspect;
+        case "repair":   return Icons.navRepair;
+        // flow/rf/coupling 等未实现工位:复用已验证的时钟码位(坑 6 —— 新码位
+        // 必须在 MDL2/Fluent 两套字体里都确认过，不新增未验证的)
+        default:         return Icons.pending;
+        }
+    }
 
     color: Theme.bgDeep
 
@@ -93,14 +117,20 @@ Rectangle {
                     Icon {
                         text: cell.modelData.icon
                         size: 20
-                        color: cell.active ? Theme.brand : Theme.textSecondary
+                        // 未实现工位压到三级灰:导航里看得见(工艺路线确实有这站)
+                        // 但一眼可辨"现在还点不出东西"。
+                        color: cell.active ? Theme.brand
+                               : (cell.modelData.pending ? Theme.textDim
+                                                         : Theme.textSecondary)
                         anchors.horizontalCenter: parent.horizontalCenter
                         Behavior on color { ColorAnimation { duration: Theme.durFast } }
                     }
 
                     Text {
                         text: cell.modelData.key
-                        color: cell.active ? Theme.textPrimary : Theme.textSecondary
+                        color: cell.active ? Theme.textPrimary
+                               : (cell.modelData.pending ? Theme.textDim
+                                                         : Theme.textSecondary)
                         font.family: TypeScale.family
                         font.pointSize: TypeScale.caption
                         font.weight: cell.active ? TypeScale.weightBold : TypeScale.weightRegular

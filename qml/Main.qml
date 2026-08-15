@@ -51,6 +51,12 @@ ApplicationWindow {
             NavRail {
                 id: rail
                 width: 96
+                // 开发用:--page N 启动即停在第 N 页(截图/联调方便)
+                Component.onCompleted: {
+                    const a = Qt.application.arguments;
+                    const i = a.indexOf("--page");
+                    if (i >= 0 && i + 1 < a.length) currentIndex = parseInt(a[i + 1]);
+                }
                 anchors { left: parent.left; top: parent.top; bottom: parent.bottom }
                 onSwitchProduct: switchDialog.open()
                 onSwitchUser: Session.user = null   // 保 profile,回登录页即换班
@@ -60,8 +66,11 @@ ApplicationWindow {
                 id: bar
                 height: 76
                 anchors { left: rail.right; right: parent.right; top: parent.top }
-                station: rail.entries[rail.currentIndex].key
-                isStation: rail.currentIndex <= 4
+                // 工位数随产品而变(CS7 五站、CS8 七站),不能按固定索引判断。
+                // 关于页恒在末尾 ⇒ 索引 < 工位数即为工位页。
+                station: rail.currentIndex < rail.entries.length
+                         ? rail.entries[rail.currentIndex].key : ""
+                isStation: rail.currentIndex < rail.stations.length
                 online: true
                 mismatch: win.mismatch
             }
@@ -95,27 +104,65 @@ ApplicationWindow {
         }
     }
 
-    // 极简栈:只让当前页可见,并做一次淡入(全屏转场 300-400ms 预算内)。
-    // 工位页(0-4)在设备型号不符时整页禁用;关于页(5)不受影响。
+    // 工位页按产品 profile 的 stations 动态生成 —— 工位序列由产品决定
+    // （射频线产品多流量/射频/耦合三站且无调焦），不再硬编码 index。
+    // 关于页与工位无关，恒定挂在末尾（索引 = stations.length，与 NavRail 一致）。
+    // 设备型号不符时工位页整页禁用，关于页不受影响。
     component StackLayout_: Item {
+        id: stack
         property int index: 0
 
-        ViewFocus    { anchors.fill: parent; visible: index === 0; enabled: !win.mismatch
-                       opacity: visible ? 1 : 0
-                       Behavior on opacity { NumberAnimation { duration: Theme.durSlow } } }
-        ViewFinished { anchors.fill: parent; visible: index === 1; semi: true; enabled: !win.mismatch
-                       opacity: visible ? 1 : 0
-                       Behavior on opacity { NumberAnimation { duration: Theme.durSlow } } }
-        ViewFinished { anchors.fill: parent; visible: index === 2; enabled: !win.mismatch
-                       opacity: visible ? 1 : 0
-                       Behavior on opacity { NumberAnimation { duration: Theme.durSlow } } }
-        ViewInspect  { anchors.fill: parent; visible: index === 3; enabled: !win.mismatch
-                       opacity: visible ? 1 : 0
-                       Behavior on opacity { NumberAnimation { duration: Theme.durSlow } } }
-        ViewRepair   { anchors.fill: parent; visible: index === 4; enabled: !win.mismatch
-                       opacity: visible ? 1 : 0
-                       Behavior on opacity { NumberAnimation { duration: Theme.durSlow } } }
-        ViewAbout    { anchors.fill: parent; visible: index === 5; opacity: visible ? 1 : 0
-                       Behavior on opacity { NumberAnimation { duration: Theme.durSlow } } }
+        readonly property var stations: Session.profile && Session.profile.stations
+                                        ? Session.profile.stations : []
+
+        // 用 Repeater + Loader:切产品时整批重建，旧工位页随之销毁
+        //（与"切产品即换会话"一致，不靠逐个清理）。
+        Repeater {
+            model: stack.stations
+
+            Loader {
+                required property int index
+                required property var modelData
+
+                anchors.fill: parent
+                active: true
+                visible: stack.index === index
+                enabled: !win.mismatch
+                opacity: visible ? 1 : 0
+                Behavior on opacity { NumberAnimation { duration: Theme.durSlow } }
+
+                sourceComponent: {
+                    if (modelData.pending === true) return pendingPage;
+                    switch (modelData.key) {
+                    case "focus":    return focusPage;
+                    case "semi":     return semiPage;
+                    case "finished": return finishedPage;
+                    case "inspect":  return inspectPage;
+                    case "repair":   return repairPage;
+                    // profile 写了未知 key 也不能白屏 —— 按未实现处理
+                    default:         return pendingPage;
+                    }
+                }
+                onLoaded: {
+                    if (item && item.hasOwnProperty("station")) {
+                        item.station = modelData;
+                    }
+                }
+            }
+        }
+
+        ViewAbout {
+            anchors.fill: parent
+            visible: stack.index === stack.stations.length
+            opacity: visible ? 1 : 0
+            Behavior on opacity { NumberAnimation { duration: Theme.durSlow } }
+        }
+
+        Component { id: focusPage;    ViewFocus {} }
+        Component { id: semiPage;     ViewFinished { semi: true } }
+        Component { id: finishedPage; ViewFinished {} }
+        Component { id: inspectPage;  ViewInspect {} }
+        Component { id: repairPage;   ViewRepair {} }
+        Component { id: pendingPage;  ViewPending {} }
     }
 }

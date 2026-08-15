@@ -24,6 +24,12 @@ Item {
         });
     }
 
+    // 自动项(设备回读数,PC 比阈值可自动判) vs 人工项(设备只回 ok,
+    // 真实结论在工人眼睛耳朵里)。分开的理由见 ManualVerifyPanel 头注释。
+    readonly property var manualBits: [0, 1, 2, 7]     // 指示灯/红外/白光/喇叭
+    readonly property var autoRows: rows.filter(r => manualBits.indexOf(r.item) < 0)
+    readonly property var manualRows: rows.filter(r => manualBits.indexOf(r.item) >= 0)
+
     readonly property var counts: {
         const c = { pass: 0, fail: 0, run: 0, wait: 0, miss: 0 };
         rows.forEach(function (r) {
@@ -54,15 +60,22 @@ Item {
             }
         }
 
-        // ---- 中:测试项 ----
-        Card {
-            title: "测试项  ·  profile ∩ 设备能力集"
-            titleIcon: Icons.navFinished
+        // ---- 中:自动测试项 + 人工判定 + 写标识 ----
+        ColumnLayout {
             Layout.fillWidth: true
             Layout.fillHeight: true
+            spacing: Theme.s4
 
+        Card {
+            title: "自动测试项  ·  设备回读数，PC 判阈值"
+            titleIcon: Icons.navFinished
+            fitContent: true
+            Layout.fillWidth: true
+
+            // fitContent 卡片内层禁用 anchors.fill —— 卡高取决于内容、
+            // 内容又填满卡 = 循环依赖,整张卡会塌成一条
             ColumnLayout {
-                anchors.fill: parent
+                anchors { left: parent.left; right: parent.right; top: parent.top }
                 spacing: Theme.s3
 
                 // 汇总条:通过/失败/待测计数,先给结论再给明细(倒金字塔)
@@ -110,18 +123,19 @@ Item {
 
                 Rectangle { Layout.fillWidth: true; height: 1; color: Theme.border }
 
-                ListView {
+                // 用 Repeater 不用 ListView:自动项只 3 行且固定,
+                // ListView 的 contentHeight 在布局时为 0,会把整张卡压没
+                Column {
                     Layout.fillWidth: true
-                    Layout.fillHeight: true
-                    clip: true
                     spacing: 2
-                    model: rows
-                    ScrollBar.vertical: ScrollBar {}
 
-                    delegate: TestItemRow {
-                        required property var modelData
-                        width: ListView.view.width
-                        model: modelData
+                    Repeater {
+                        model: autoRows
+                        TestItemRow {
+                            required property var modelData
+                            width: parent.width
+                            model: modelData
+                        }
                     }
                 }
 
@@ -134,6 +148,8 @@ Item {
                         glyph: Icons.play
                         kind: "primary"
                         Layout.fillWidth: true
+                        // 自动项跑完后开放人工判定面板
+                        onClicked: manualPanel.ready = true
                     }
                     AppButton {
                         text: "跳过当前项"
@@ -149,6 +165,47 @@ Item {
             }
         }
 
+            // 人工判定面板:自动项跑完后集中确认四个人工项。
+            // 设备回 ok 只代表"指令执行了",发光/出声固件感知不到。
+            ManualVerifyPanel {
+                id: manualPanel
+                Layout.fillWidth: true
+            }
+
+            // 写标识:自动项全过 + 人工项全判且无异常,才允许写
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: Theme.s3
+
+                AppButton {
+                    text: semi ? "写准成品标识" : "写成品标识"
+                    glyph: Icons.save
+                    kind: "primary"
+                    enabled: counts.fail === 0 && counts.miss === 0
+                             && manualPanel.allDone && !manualPanel.anyFail
+                    onClicked: confirm.ask(semi ? "写入准成品标识？" : "写入成品标识？",
+                        "将写入" + (semi ? "准成品（Stage=2）" : "成品（Stage=3）")
+                        + "完成时间戳，自动项与人工判定均已通过。",
+                        function () { /* 真实实现:PtestWriteStage */ })
+                }
+
+                Text {
+                    Layout.fillWidth: true
+                    visible: !(counts.fail === 0 && counts.miss === 0
+                               && manualPanel.allDone && !manualPanel.anyFail)
+                    text: {
+                        if (counts.fail > 0 || counts.miss > 0) return "自动项有未通过";
+                        if (!manualPanel.allDone) return "人工判定未完成";
+                        return "人工判定有异常项";
+                    }
+                    color: Theme.warn
+                    font.family: TypeScale.family
+                    font.pointSize: TypeScale.body
+                    wrapMode: Text.WordWrap
+                }
+            }
+        }
+
         // ---- 右:结果 + 设备信息 ----
         ColumnLayout {
             Layout.preferredWidth: 320
@@ -159,8 +216,21 @@ Item {
             ResultBanner {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 172
-                state_: "running"
-                caption: "喇叭  ·  等待设备回报"
+                state_: {
+                    if (counts.fail > 0 || counts.miss > 0 || manualPanel.anyFail) return "fail";
+                    if (manualPanel.allDone) return "pass";
+                    if (counts.run > 0) return "running";
+                    return "idle";
+                }
+                caption: {
+                    if (counts.fail > 0 || counts.miss > 0) return "自动项不通过";
+                    if (manualPanel.anyFail) return "人工判定不通过";
+                    if (manualPanel.allDone) return "全部通过，可写标识";
+                    if (manualPanel.ready) return "待人工判定  " + manualPanel.settledCount
+                                                  + " / " + manualPanel.checks.length;
+                    if (counts.run > 0) return "自动项执行中";
+                    return "待开始";
+                }
             }
 
             Card {

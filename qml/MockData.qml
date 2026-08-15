@@ -10,15 +10,44 @@ QtObject {
     // ---- 产品 profiles(规则2:真实实现 = 安装目录 profiles/*.json,
     //      随软件发布/管理员维护,普通工人不可编辑) ----
     // items = 本产品固定测试项(bit 序号);enabled:false = 待建模,启动门置灰(规则6)
+    // stations = 本产品的工位序列(规则:工位由产品决定,不同产品工位不同)。
+    // 每项 key 决定导航标题与页面路由;pending:true = 该工位页面尚未实现,
+    // 进入后显示占位页(工位存在于工艺路线里,只是软件还没做,不该假装没有)。
+    // 已实现的 key: focus/semi/finished/inspect/repair(+about 由 NavRail 恒定追加)
     readonly property var profiles: [
         { name: "CS7GV1.0", desc: "低功耗电池 IPC", productId: "5KHBENFCX2",
-          enabled: true,  items: [0, 1, 2, 5, 7, 9, 10] },
+          enabled: true,  items: [0, 1, 2, 5, 7, 9, 10],
+          stations: [
+              { key: "focus",    title: "调焦",   sub: "工位 1" },
+              { key: "semi",     title: "准成品", sub: "工位 2" },
+              { key: "finished", title: "成品",   sub: "工位 2" },
+              { key: "inspect",  title: "检查",   sub: "工位 3" },
+              { key: "repair",   title: "维修",   sub: "按需"   }
+          ] },
+        // 示例:多产品工位差异。射频类产品在成品之前多三个工位,
+        // 且不做调焦(无镜头对焦环节)。用于验证"切产品换工位"的正确性。
+        { name: "CS8GV1.0", desc: "4G 摄像机(射频线)", productId: "8KH2RFDEMO",
+          enabled: true,  items: [0, 1, 2, 5, 7, 9, 10],
+          stations: [
+              { key: "flow",     title: "流量",   sub: "工位 1", pending: true },
+              { key: "rf",       title: "射频",   sub: "工位 2", pending: true },
+              { key: "coupling", title: "耦合",   sub: "工位 3", pending: true },
+              { key: "semi",     title: "准成品", sub: "工位 4" },
+              { key: "finished", title: "成品",   sub: "工位 4" },
+              { key: "inspect",  title: "检查",   sub: "工位 5" },
+              { key: "repair",   title: "维修",   sub: "按需"   }
+          ] },
         { name: "CS6GV2.0", desc: "低功耗电池 IPC", productId: "",
-          enabled: false, items: [] }
+          enabled: false, items: [], stations: [] }
     ]
 
-    // 设备上报的 ProductId(准入校验用,规则5)。mock 与 CS7GV1.0 一致。
-    readonly property string deviceProductId: "5KHBENFCX2"
+    // 设备上报的 ProductId(准入校验用,规则5)。
+    // mock 里让"设备"跟随当前会话产品 —— 否则切到 CS8GV1.0 演示时会立刻判型号
+    // 不符、全部工位页禁用，看不到工位差异。准入比较的代码路径仍然存在
+    // (Main.qml mismatch)，真实实现里这个值来自设备上报，不会跟随会话。
+    readonly property string deviceProductId:
+        Session.profile && Session.profile.productId ? Session.profile.productId
+                                                     : "5KHBENFCX2"
 
     // 兼容字段(检查页 ProductKey 展示用 = 设备上报值)
     readonly property string productId:   "5KHBENFCX2"
