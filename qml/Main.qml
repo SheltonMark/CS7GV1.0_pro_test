@@ -19,48 +19,96 @@ ApplicationWindow {
     // 注意：qtquickcontrols2.conf 里写 Accent= 无效，只有 palette.accent 生效。
     palette.accent: Theme.accent
 
-    NavRail {
-        id: rail
-        width: 96
-        anchors { left: parent.left; top: parent.top; bottom: parent.bottom }
+    // 设备准入(规则5):设备上报的 ProductId 与会话产品不符 → 顶栏红警,
+    // 全部工位操作禁用(关于页保持可用)。mock 里两者一致,路径存在但不触发。
+    readonly property bool mismatch: Session.profile !== null
+        && MockData.deviceProductId !== Session.profile.productId
+
+    // 启动门:未选产品时的唯一一屏(规则1)
+    ProductGate {
+        anchors.fill: parent
+        visible: Session.profile === null
     }
 
-    TopBar {
-        id: bar
-        height: 76
-        anchors { left: rail.right; right: parent.right; top: parent.top }
-        station: rail.entries[rail.currentIndex].key
-        isStation: rail.currentIndex <= 4
-        online: true
+    // 主界面挂 Loader:切换产品 = Session.profile 置空 → 整棵 UI 销毁重建,
+    // 设备连接/指令流水/页面状态随会话一起清空,不做逐项清理(会漏)。
+    Loader {
+        anchors.fill: parent
+        active: Session.profile !== null
+        sourceComponent: mainUi
     }
 
-    StackLayout_ {
-        anchors {
-            left: rail.right; right: parent.right
-            top: bar.bottom; bottom: parent.bottom
+    Component {
+        id: mainUi
+
+        Item {
+            NavRail {
+                id: rail
+                width: 96
+                anchors { left: parent.left; top: parent.top; bottom: parent.bottom }
+            }
+
+            TopBar {
+                id: bar
+                height: 76
+                anchors { left: rail.right; right: parent.right; top: parent.top }
+                station: rail.entries[rail.currentIndex].key
+                isStation: rail.currentIndex <= 4
+                online: true
+                mismatch: win.mismatch
+                onSwitchProduct: switchDialog.open()
+            }
+
+            StackLayout_ {
+                anchors {
+                    left: rail.right; right: parent.right
+                    top: bar.bottom; bottom: parent.bottom
+                }
+                index: rail.currentIndex
+            }
+
+            // 切产品 = 换会话,二次确认(规则1)
+            Dialog {
+                id: switchDialog
+                title: "切换产品？"
+                modal: true
+                anchors.centerIn: parent
+                standardButtons: Dialog.Ok | Dialog.Cancel
+                onAccepted: Session.profile = null
+
+                Text {
+                    width: 340
+                    text: "切换产品将断开当前设备连接并清空指令流水，返回产品选择。"
+                    color: Theme.textPrimary
+                    font.family: TypeScale.family
+                    font.pointSize: TypeScale.body
+                    wrapMode: Text.WordWrap
+                }
+            }
         }
-        index: rail.currentIndex
     }
 
-    // 极简栈:只让当前页可见,并做一次淡入(全屏转场 300-400ms 预算内)
+    // 极简栈:只让当前页可见,并做一次淡入(全屏转场 300-400ms 预算内)。
+    // 工位页(0-4)在设备型号不符时整页禁用;关于页(5)不受影响。
     component StackLayout_: Item {
         property int index: 0
 
-        ViewFocus    { anchors.fill: parent; visible: index === 0; opacity: visible ? 1 : 0
-                       Behavior on opacity { NumberAnimation { duration: Theme.durSlow } } }
-        ViewFinished { anchors.fill: parent; visible: index === 1; semi: true
+        ViewFocus    { anchors.fill: parent; visible: index === 0; enabled: !win.mismatch
                        opacity: visible ? 1 : 0
                        Behavior on opacity { NumberAnimation { duration: Theme.durSlow } } }
-        ViewFinished { anchors.fill: parent; visible: index === 2
+        ViewFinished { anchors.fill: parent; visible: index === 1; semi: true; enabled: !win.mismatch
                        opacity: visible ? 1 : 0
                        Behavior on opacity { NumberAnimation { duration: Theme.durSlow } } }
-        ViewInspect  { anchors.fill: parent; visible: index === 3; opacity: visible ? 1 : 0
+        ViewFinished { anchors.fill: parent; visible: index === 2; enabled: !win.mismatch
+                       opacity: visible ? 1 : 0
                        Behavior on opacity { NumberAnimation { duration: Theme.durSlow } } }
-        ViewRepair   { anchors.fill: parent; visible: index === 4; opacity: visible ? 1 : 0
+        ViewInspect  { anchors.fill: parent; visible: index === 3; enabled: !win.mismatch
+                       opacity: visible ? 1 : 0
                        Behavior on opacity { NumberAnimation { duration: Theme.durSlow } } }
-        ViewProfile  { anchors.fill: parent; visible: index === 5; opacity: visible ? 1 : 0
+        ViewRepair   { anchors.fill: parent; visible: index === 4; enabled: !win.mismatch
+                       opacity: visible ? 1 : 0
                        Behavior on opacity { NumberAnimation { duration: Theme.durSlow } } }
-        ViewAbout    { anchors.fill: parent; visible: index === 6; opacity: visible ? 1 : 0
+        ViewAbout    { anchors.fill: parent; visible: index === 5; opacity: visible ? 1 : 0
                        Behavior on opacity { NumberAnimation { duration: Theme.durSlow } } }
     }
 }

@@ -7,9 +7,20 @@ import ptest
 QtObject {
     id: root
 
-    // ---- 当前产品 profile(多产品:一份配置一款产品) ----
-    readonly property string productName: "CS7GV1.0"
-    readonly property string productDesc: "低功耗电池 IPC"
+    // ---- 产品 profiles(规则2:真实实现 = 安装目录 profiles/*.json,
+    //      随软件发布/管理员维护,普通工人不可编辑) ----
+    // items = 本产品固定测试项(bit 序号);enabled:false = 待建模,启动门置灰(规则6)
+    readonly property var profiles: [
+        { name: "CS7GV1.0", desc: "低功耗电池 IPC", productId: "5KHBENFCX2",
+          enabled: true,  items: [0, 1, 2, 5, 7, 9, 10] },
+        { name: "CS6GV2.0", desc: "低功耗电池 IPC", productId: "",
+          enabled: false, items: [] }
+    ]
+
+    // 设备上报的 ProductId(准入校验用,规则5)。mock 与 CS7GV1.0 一致。
+    readonly property string deviceProductId: "5KHBENFCX2"
+
+    // 兼容字段(检查页 ProductKey 展示用 = 设备上报值)
     readonly property string productId:   "5KHBENFCX2"
 
     // ---- ProductTestInfo 假值 ----
@@ -29,7 +40,9 @@ QtObject {
     // 本地按评审表 §2.6 算得(zlib CRC32(DeviceSecret+ProductSecret),8位大写hex)。
     // 真实实现由 C++ 用下发时的明文算;mock 直接给相同值 = 校验通过。
     readonly property string localSecretCrc32: "7F3A9B2E"
-    readonly property int supportedItems: 0x6A7   // 首版位图:七项可测
+    // ⚠️ 运行时值,禁止硬编码(规则4)。真机首版=0x6A7(七项);
+    // mock 故意去掉 bit10(SD)=0x2A7,演示"profile 要求而设备未上报→标红缺能力"。
+    readonly property int supportedItems: 0x2A7
 
     // 四阶段完成时间戳(空串 = 未完成)
     readonly property string focusTime:   "20260815094512380"
@@ -45,7 +58,13 @@ QtObject {
         { name: "肖洁", wecom: "0038165" }
     ]
 
-    // ---- 11 项测试项主表 ----
+    function itemByBit(bit) {
+        for (var i = 0; i < items.length; i++)
+            if (items[i].item === bit) return items[i];
+        return null;
+    }
+
+    // ---- 11 项测试项主表(设备侧全集;实际渲染 = profile ∩ SupportedItems 决定) ----
     // state: 0 待测 1 执行中 2 通过 3 失败 4 设备不支持 5 profile要求但设备缺(标红)
     readonly property var items: [
         { item: 0,  name: "指示灯",    detail: "红蓝双色 + 闪烁",     state: 2, reading: "ok" },

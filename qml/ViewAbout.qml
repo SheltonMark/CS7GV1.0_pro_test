@@ -64,6 +64,90 @@ Item {
                 }
             }
 
+            // ---- 当前产品(只读,规则3;profile 由管理员维护,此处不给编辑入口) ----
+            Card {
+                title: "当前产品"
+                titleIcon: Icons.navProduct
+                fitContent: true
+                Layout.fillWidth: true
+                Layout.leftMargin: Theme.s5
+                Layout.rightMargin: Theme.s5
+
+                ColumnLayout {
+                    anchors { left: parent.left; right: parent.right; top: parent.top }
+                    spacing: Theme.s3
+
+                    GridLayout {
+                        Layout.fillWidth: true
+                        columns: 2
+                        columnSpacing: Theme.s7
+                        rowSpacing: Theme.s3
+
+                        FieldRow {
+                            Layout.fillWidth: true
+                            label: "产品"
+                            value: Session.profile ? Session.profile.name + "  " + Session.profile.desc : ""
+                            mono: false
+                        }
+                        FieldRow {
+                            Layout.fillWidth: true
+                            label: "ProductId"
+                            value: Session.profile ? Session.profile.productId : ""
+                        }
+                    }
+
+                    // 固定测试项(profile 决定,只读展示)
+                    Flow {
+                        Layout.fillWidth: true
+                        spacing: Theme.s2
+
+                        Repeater {
+                            model: Session.profile ? Session.profile.items : []
+                            Rectangle {
+                                required property var modelData
+                                width: chipRow.implicitWidth + Theme.s3
+                                height: 24; radius: 12
+                                color: Qt.rgba(1, 1, 1, 0.04)
+                                border.width: 1
+                                border.color: Theme.borderSoft
+                                Row {
+                                    id: chipRow
+                                    anchors.centerIn: parent
+                                    spacing: Theme.s1
+                                    Icon {
+                                        text: Icons.forItem(modelData)
+                                        size: 11
+                                        color: Theme.textSecondary
+                                        anchors.verticalCenter: parent.verticalCenter
+                                    }
+                                    Text {
+                                        text: {
+                                            const it = MockData.itemByBit(modelData);
+                                            return it ? it.name : ("bit" + modelData);
+                                        }
+                                        color: Theme.textSecondary
+                                        font.family: TypeScale.family
+                                        font.pointSize: TypeScale.caption
+                                        anchors.verticalCenter: parent.verticalCenter
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Text {
+                        Layout.fillWidth: true
+                        text: "测试项集合由产品 profile 固定（profiles/" 
+                              + (Session.profile ? Session.profile.name : "") 
+                              + ".json，管理员随软件发布维护）。切换产品用顶栏按钮。"
+                        color: Theme.textDim
+                        font.family: TypeScale.family
+                        font.pointSize: TypeScale.caption
+                        wrapMode: Text.WordWrap
+                    }
+                }
+            }
+
             // ---- 版本 ----
             Card {
                 title: "版本"

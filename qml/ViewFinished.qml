@@ -8,6 +8,32 @@ import QtQuick.Layouts
 Item {
     property bool semi: false
 
+    // 实际下发行集(规则4) = profile 固定项 ∩ 设备 SupportedItems:
+    // - profile 要求而设备未上报 → state 覆写为 5(缺能力,标红,计不通过),不静默跳过
+    // - 设备上报而 profile 不含 → 不出现在列表(不下发)
+    // SupportedItems 是运行时上报值,这里每次现算,不落任何硬编码。
+    readonly property var rows: {
+        if (!Session.profile) return [];
+        const dev = MockData.supportedItems;
+        return Session.profile.items.map(function (bit) {
+            const base = MockData.itemByBit(bit);
+            if (dev & (1 << bit)) return base;
+            return Object.assign({}, base, { state: 5, reading: "" });
+        });
+    }
+
+    readonly property var counts: {
+        const c = { pass: 0, fail: 0, run: 0, wait: 0, miss: 0 };
+        rows.forEach(function (r) {
+            if (r.state === 2) c.pass++;
+            else if (r.state === 3) c.fail++;
+            else if (r.state === 1) c.run++;
+            else if (r.state === 5) c.miss++;
+            else c.wait++;
+        });
+        return c;
+    }
+
     RowLayout {
         anchors.fill: parent
         anchors.margins: Theme.s5
@@ -28,7 +54,7 @@ Item {
 
         // ---- 中:测试项 ----
         Card {
-            title: "测试项  ·  按能力集与勾选下发"
+            title: "测试项  ·  profile ∩ 设备能力集"
             titleIcon: Icons.navFinished
             Layout.fillWidth: true
             Layout.fillHeight: true
@@ -44,11 +70,11 @@ Item {
 
                     Repeater {
                         model: [
-                            { label: "通过", n: 4, c: Theme.pass },
-                            { label: "失败", n: 1, c: Theme.fail },
-                            { label: "待测", n: 2, c: Theme.textSecondary },
-                            { label: "不支持", n: 2, c: Theme.idle },
-                            { label: "缺能力", n: 1, c: Theme.fail }
+                            { label: "通过",   n: counts.pass, c: Theme.pass },
+                            { label: "失败",   n: counts.fail, c: Theme.fail },
+                            { label: "执行中", n: counts.run,  c: Theme.running },
+                            { label: "待测",   n: counts.wait, c: Theme.textSecondary },
+                            { label: "缺能力", n: counts.miss, c: Theme.fail }
                         ]
                         Row {
                             required property var modelData
@@ -87,7 +113,7 @@ Item {
                     Layout.fillHeight: true
                     clip: true
                     spacing: 2
-                    model: MockData.items
+                    model: rows
                     ScrollBar.vertical: ScrollBar {}
 
                     delegate: TestItemRow {

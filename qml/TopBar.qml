@@ -4,9 +4,12 @@ import ptest
 // 顶栏:产品 / 设备 SN(大) / 连接态。工人一眼确认"手上这台就是屏幕上这台"。
 Rectangle {
     property string station: ""
-    // 只有真正的工位页(调焦/准成品/成品/维修)才带"工位"后缀,产品/关于不是工位
+    // 只有真正的工位页才带"工位"后缀,关于页不是工位
     property bool isStation: true
     property bool online: true
+    // 设备上报 ProductId 与会话产品不符(规则5)
+    property bool mismatch: false
+    signal switchProduct()
 
     color: Theme.bg
 
@@ -44,9 +47,11 @@ Rectangle {
         Text {
             // 工具版本挂在这里：产线出批量误判要能追溯是哪个版本干的。
             // 将来每条产测记录也要带上同一个值。
-            text: MockData.productName + "  " + MockData.productDesc
-                  + "  ·  " + MockData.productId
-                  + "      工具 v" + (typeof appVersion !== "undefined" ? appVersion : "dev")
+            text: Session.profile
+                  ? Session.profile.name + "  " + Session.profile.desc
+                    + "  ·  " + Session.profile.productId
+                    + "      工具 v" + (typeof appVersion !== "undefined" ? appVersion : "dev")
+                  : ""
             color: Theme.textSecondary
             font.family: TypeScale.family
             font.pointSize: TypeScale.caption
@@ -58,6 +63,35 @@ Rectangle {
         anchors {
             right: parent.right; rightMargin: Theme.s6
             verticalCenter: parent.verticalCenter
+        }
+
+        // 型号不符红警(规则5):禁用工位操作的原因必须让工人一眼看到
+        Row {
+            visible: mismatch
+            spacing: Theme.s2
+            anchors.verticalCenter: parent.verticalCenter
+            Icon {
+                text: Icons.warning
+                size: 15
+                color: Theme.fail
+                anchors.verticalCenter: parent.verticalCenter
+            }
+            Text {
+                text: "设备型号与当前产品不符 · 工位操作已禁用"
+                color: Theme.fail
+                font.family: TypeScale.family
+                font.pointSize: TypeScale.body
+                font.weight: TypeScale.weightBold
+                anchors.verticalCenter: parent.verticalCenter
+            }
+        }
+
+        AppButton {
+            text: "切换产品"
+            glyph: Icons.reset
+            implicitHeight: Theme.hit - 8
+            anchors.verticalCenter: parent.verticalCenter
+            onClicked: switchProduct()
         }
 
         // 设备 SN 用 hero 字号 —— 产线核对最频繁的字段

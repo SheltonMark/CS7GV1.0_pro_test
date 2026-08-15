@@ -30,7 +30,7 @@ target_link_libraries(app_ptest PRIVATE
 
 # pragma Singleton 只是 QML 侧声明，构建系统这边也必须标。
 set_source_files_properties(
-    qml/Theme.qml qml/TypeScale.qml qml/Icons.qml qml/MockData.qml
+    qml/Theme.qml qml/TypeScale.qml qml/Icons.qml qml/MockData.qml qml/Session.qml
     PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
 
 # logo 在 resources/ 但 QML 落在 qrc:/qt/qml/ptest/qml/ 下，
@@ -48,6 +48,7 @@ qt_add_qml_module(app_ptest
         qml/TypeScale.qml
         qml/Icons.qml
         qml/MockData.qml
+        qml/Session.qml
         # 组件
         qml/Icon.qml
         qml/AppButton.qml
@@ -63,8 +64,8 @@ qt_add_qml_module(app_ptest
         qml/ViewFinished.qml
         qml/ViewInspect.qml
         qml/ViewRepair.qml
-        qml/ViewProfile.qml
         qml/ViewAbout.qml
+        qml/ProductGate.qml
     RESOURCES
         # logo 与 QML 同目录，QML 里直接写 "logo.png" 即可
         resources/logo.png

@@ -6,7 +6,6 @@ import QtQuick.Controls
 // 三态分色是关键 —— 灰=设备不支持(正常跳过)、红=profile要但设备缺(疑似没接线)。
 Rectangle {
     property var model: ({})
-    property bool checked: true
 
     readonly property int st: model.state !== undefined ? model.state : 0
     readonly property bool unsupported: st === 4
@@ -32,23 +31,14 @@ Rectangle {
         }
     }
 
-    CheckBox {
-        id: cb
-        checked: parent.checked && !unsupported
-        enabled: !unsupported
-        anchors.left: parent.left
-        anchors.leftMargin: Theme.s3
-        anchors.verticalCenter: parent.verticalCenter
-    }
-
     // 外设图标。图标 + 文字双编码：工人扫一眼就知道这行测的是什么硬件，
     // 不必逐字读。图标底色跟状态走，让整行状态在外围视觉里也成立。
     Rectangle {
         id: itemIcon
         width: 30; height: 30
         radius: Theme.radius
-        anchors.left: cb.right
-        anchors.leftMargin: Theme.s2
+        anchors.left: parent.left
+        anchors.leftMargin: Theme.s3
         anchors.verticalCenter: parent.verticalCenter
 
         readonly property color tone: Theme.itemStateColor(st)
@@ -84,7 +74,7 @@ Rectangle {
         }
         Text {
             text: {
-                if (missingCap) return "profile 要求,但设备未上报该能力 —— 检查接线";
+                if (missingCap) return "设备未上报能力，检查接线";
                 if (model.reading !== undefined && model.reading.length > 0) return model.reading;
                 return model.detail !== undefined ? model.detail : "";
             }
