@@ -4,6 +4,8 @@ import ptest
 // 顶栏:产品 / 设备 SN(大) / 连接态。工人一眼确认"手上这台就是屏幕上这台"。
 Rectangle {
     property string station: ""
+    // 只有真正的工位页(调焦/准成品/成品/维修)才带"工位"后缀,产品/关于不是工位
+    property bool isStation: true
     property bool online: true
 
     color: Theme.bg
@@ -31,6 +33,7 @@ Rectangle {
                 font.weight: TypeScale.weightBold
             }
             Text {
+                visible: isStation
                 text: "工位"
                 color: Theme.textDim
                 font.family: TypeScale.family

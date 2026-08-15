@@ -134,12 +134,29 @@ Item {
 
                         // 不显示 bit 序号 —— 那是内部实现细节,产线看项名就够。
                         // 位图整值仍在成品页顶部给出,诊断时够用。
+                        Rectangle {
+                            id: chip
+                            width: 30; height: 30
+                            radius: Theme.radius
+                            color: Qt.rgba(1, 1, 1, 0.04)
+                            anchors.left: cb.right
+                            anchors.leftMargin: Theme.s2
+                            anchors.verticalCenter: parent.verticalCenter
+                            Icon {
+                                anchors.centerIn: parent
+                                text: Icons.forItem(modelData.item)
+                                size: 15
+                                color: (MockData.supportedItems & (1 << modelData.item))
+                                       ? Theme.textSecondary : Theme.textDim
+                            }
+                        }
+
                         Text {
                             text: modelData.name
                             color: Theme.textPrimary
                             font.family: TypeScale.family
                             font.pointSize: TypeScale.body
-                            anchors.left: cb.right
+                            anchors.left: chip.right
                             anchors.leftMargin: Theme.s3
                             anchors.verticalCenter: parent.verticalCenter
                         }

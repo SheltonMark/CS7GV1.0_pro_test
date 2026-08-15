@@ -30,6 +30,7 @@ ApplicationWindow {
         height: 76
         anchors { left: rail.right; right: parent.right; top: parent.top }
         station: rail.entries[rail.currentIndex].key
+        isStation: rail.currentIndex <= 3
         online: true
     }
 

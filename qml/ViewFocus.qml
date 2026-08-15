@@ -104,25 +104,25 @@ Item {
                 Layout.fillWidth: true
                 spacing: Theme.s3
 
-                Button {
+                AppButton {
                     text: "开始拉流"
-                    highlighted: true
-                    implicitHeight: Theme.hit
-                    Layout.preferredWidth: 150
+                    glyph: Icons.play
+                    kind: "primary"
+                    Layout.preferredWidth: 158
                 }
-                Button {
+                AppButton {
                     text: "停止"
-                    implicitHeight: Theme.hit
-                    Layout.preferredWidth: 110
+                    glyph: Icons.stop
+                    Layout.preferredWidth: 118
                 }
 
                 Item { Layout.fillWidth: true }
 
-                Button {
+                AppButton {
                     text: "调焦完成，写标识"
-                    highlighted: true
-                    implicitHeight: Theme.hit
-                    Layout.preferredWidth: 190
+                    glyph: Icons.save
+                    kind: "primary"
+                    Layout.preferredWidth: 204
                 }
             }
         }
@@ -143,7 +143,7 @@ Item {
 
             Card {
                 title: "咪头  ·  人工判定"
-                    titleIcon: Icons.mic
+                titleIcon: Icons.mic
                 fitContent: true
                 Layout.fillWidth: true
 
@@ -162,15 +162,15 @@ Item {
 
                     Row {
                         spacing: Theme.s3
-                        Button { text: "听到了";   highlighted: true; implicitHeight: Theme.hit; width: 110 }
-                        Button { text: "没听到"; implicitHeight: Theme.hit; width: 110 }
+                        AppButton { text: "听到了"; glyph: Icons.pass; kind: "primary"; width: 116 }
+                        AppButton { text: "没听到"; glyph: Icons.fail; width: 116 }
                     }
                 }
             }
 
             Card {
                 title: "工位流程"
-                    titleIcon: Icons.navFocus
+                titleIcon: Icons.navFocus
                 Layout.fillWidth: true
                 Layout.fillHeight: true
 

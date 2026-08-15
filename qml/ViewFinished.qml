@@ -101,57 +101,15 @@ Item {
                     Layout.fillWidth: true
                     spacing: Theme.s3
 
-                    Button {
-                        highlighted: true
-                        implicitHeight: Theme.hit
+                    AppButton {
+                        text: "开始自动化测试"
+                        glyph: Icons.play
+                        kind: "primary"
                         Layout.fillWidth: true
-                        contentItem: Item {
-                            implicitHeight: goRow.implicitHeight
-                            Row {
-                            id: goRow
-                            anchors.centerIn: parent
-                            spacing: Theme.s2
-                            Icon {
-                                text: Icons.play
-                                size: 15
-                                color: "#FFFFFF"
-                                anchors.verticalCenter: parent.verticalCenter
-                            }
-                            Text {
-                                text: "开始自动化测试"
-                                color: "#FFFFFF"
-                                font.family: TypeScale.family
-                                font.pointSize: TypeScale.body
-                                font.weight: TypeScale.weightBold
-                                anchors.verticalCenter: parent.verticalCenter
-                            }
-                            }
-                        }
                     }
-                    Button {
-                        implicitHeight: Theme.hit
-                        contentItem: Item {
-                            implicitWidth: skipRow.implicitWidth
-                            implicitHeight: skipRow.implicitHeight
-                            Row {
-                            id: skipRow
-                            anchors.centerIn: parent
-                            spacing: Theme.s2
-                            Icon {
-                                text: Icons.skip
-                                size: 14
-                                color: Theme.textSecondary
-                                anchors.verticalCenter: parent.verticalCenter
-                            }
-                            Text {
-                                text: "跳过当前项"
-                                color: Theme.textPrimary
-                                font.family: TypeScale.family
-                                font.pointSize: TypeScale.body
-                                anchors.verticalCenter: parent.verticalCenter
-                            }
-                            }
-                        }
+                    AppButton {
+                        text: "跳过当前项"
+                        glyph: Icons.skip
                     }
                 }
             }

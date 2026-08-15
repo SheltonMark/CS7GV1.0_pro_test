@@ -3,7 +3,7 @@ import ptest
 import QtQuick.Controls
 import QtQuick.Layouts
 
-// 关于。产线出问题时工人要能在 10 秒内找到"该找谁"，所以联系人比版本号更靠前。
+// 关于。产线出问题时工人要能在 10 秒内找到联系人，所以联系人排在版本号之前。
 Item {
     id: root
 
@@ -104,7 +104,7 @@ Item {
 
             // ---- 负责人 ----
             Card {
-                title: "找谁"
+                title: "联系人"
                 fitContent: true
                 Layout.fillWidth: true
                 Layout.leftMargin: Theme.s5
@@ -145,49 +145,32 @@ Item {
                                     font.weight: TypeScale.weightBold
                                 }
                                 Text {
-                                    text: modelData.role + "   ·   " + modelData.wecom
+                                    text: modelData.wecom
                                     color: Theme.textSecondary
-                                    font.family: TypeScale.family
+                                    font.family: "Consolas"
                                     font.pointSize: TypeScale.caption
                                 }
                             }
 
                             Item { Layout.fillWidth: true }
 
-                            Button {
+                            AppButton {
+                                text: "企业微信"
+                                glyph: Icons.chat
+                                kind: "primary"
                                 implicitHeight: Theme.hit - 6
                                 onClicked: root.openWeCom(modelData.wecom)
-                                contentItem: RowLayout {
-                                    spacing: Theme.s2
-                                    Icon {
-                                        text: Icons.chat
-                                        size: 14
-                                        color: Theme.textPrimary
-                                    }
-                                    Text {
-                                        text: "企业微信"
-                                        color: Theme.textPrimary
-                                        font.family: TypeScale.family
-                                        font.pointSize: TypeScale.body
-                                    }
-                                }
                             }
 
-                            Button {
+                            AppButton {
+                                text: "复制工号"
+                                glyph: Icons.copy
                                 implicitHeight: Theme.hit - 6
-                                implicitWidth: Theme.hit - 6
-                                ToolTip.visible: hovered
-                                ToolTip.text: "复制工号"
                                 onClicked: {
                                     clip.text = modelData.wecom;
                                     clip.selectAll();
                                     clip.copy();
                                     copied.owner = modelData.wecom;
-                                }
-                                contentItem: Icon {
-                                    text: Icons.copy
-                                    size: 14
-                                    color: Theme.textSecondary
                                 }
                             }
                         }
@@ -209,14 +192,7 @@ Item {
                         }
                     }
 
-                    Text {
-                        Layout.fillWidth: true
-                        text: "跳转依赖本机已登录企业微信。若没反应，用右侧按钮复制工号手动搜索。"
-                        color: Theme.textDim
-                        font.family: TypeScale.family
-                        font.pointSize: TypeScale.caption
-                        wrapMode: Text.WordWrap
-                    }
+
                 }
             }
 

@@ -50,6 +50,7 @@ qt_add_qml_module(app_ptest
         qml/MockData.qml
         # 组件
         qml/Icon.qml
+        qml/AppButton.qml
         qml/Card.qml
         qml/FieldRow.qml
         qml/TestItemRow.qml

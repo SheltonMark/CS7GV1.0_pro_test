@@ -43,21 +43,31 @@ Item {
 
                     Row {
                         spacing: Theme.s3
-                        Button {
+                        AppButton {
                             text: root.archived ? "已存档" : "读取并存档"
-                            highlighted: !root.archived
+                            glyph: root.archived ? Icons.pass : Icons.save
+                            kind: root.archived ? "normal" : "primary"
                             enabled: !root.archived
-                            implicitHeight: Theme.hit
-                            width: 150
+                            width: 168
                             onClicked: root.archived = true
                         }
-                        Text {
+                        Row {
                             visible: root.archived
-                            text: "✓  已写入本地记录"
-                            color: Theme.pass
-                            font.family: TypeScale.family
-                            font.pointSize: TypeScale.body
+                            spacing: Theme.s2
                             anchors.verticalCenter: parent.verticalCenter
+                            Icon {
+                                text: Icons.pass
+                                size: 14
+                                color: Theme.pass
+                                anchors.verticalCenter: parent.verticalCenter
+                            }
+                            Text {
+                                text: "已写入本地记录"
+                                color: Theme.pass
+                                font.family: TypeScale.family
+                                font.pointSize: TypeScale.body
+                                anchors.verticalCenter: parent.verticalCenter
+                            }
                         }
                     }
                 }
@@ -104,11 +114,12 @@ Item {
 
                     Row {
                         spacing: Theme.s3
-                        Button {
+                        AppButton {
                             text: "清除加密分区"
+                            glyph: Icons.erase
+                            kind: "danger"
                             enabled: root.archived
-                            implicitHeight: Theme.hit
-                            width: 160
+                            width: 176
                             onClicked: confirmDialog.open()
                         }
                         Text {
@@ -132,8 +143,8 @@ Item {
                 Row {
                     anchors { left: parent.left; top: parent.top }
                     spacing: Theme.s3
-                    Button { text: "恢复默认配置"; implicitHeight: Theme.hit; width: 150 }
-                    Button { text: "定时重启";     implicitHeight: Theme.hit; width: 130; enabled: false }
+                    AppButton { text: "恢复默认配置"; glyph: Icons.reset; width: 168 }
+                    AppButton { text: "定时重启"; glyph: Icons.reboot; width: 146; enabled: false }
                     Text {
                         text: "重启须在恢复默认成功之后"
                         color: Theme.textDim
