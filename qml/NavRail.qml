@@ -111,16 +111,64 @@ Rectangle {
         }
     }
 
-    // 底部版本号。小字弱化，但随时可查。
-    Text {
-        text: typeof appVersion !== "undefined" ? "v" + appVersion : "dev"
-        color: Theme.textDim
-        font.family: "Consolas"
-        font.pointSize: TypeScale.caption
+    // 底部:切换产品(会话级动作,不是页面 —— 用分隔线和暗色与工位项区分;
+    // 点击走二次确认,由 Main 处理) + 版本号
+    signal switchProduct()
+
+    Column {
         anchors {
-            horizontalCenter: parent.horizontalCenter
-            bottom: parent.bottom
-            bottomMargin: Theme.s4
+            left: parent.left; right: parent.right
+            bottom: parent.bottom; bottomMargin: Theme.s3
+        }
+        spacing: Theme.s3
+
+        Rectangle {
+            width: parent.width - Theme.s4 * 2
+            height: 1
+            color: Theme.borderSoft
+            anchors.horizontalCenter: parent.horizontalCenter
+        }
+
+        Item {
+            width: parent.width
+            height: 52
+
+            Rectangle {
+                anchors.fill: parent
+                anchors.leftMargin: Theme.s2
+                anchors.rightMargin: Theme.s2
+                radius: Theme.radius
+                color: swHover.hovered ? Qt.rgba(1, 1, 1, 0.05) : "transparent"
+                Behavior on color { ColorAnimation { duration: Theme.durFast } }
+            }
+            HoverHandler { id: swHover }
+            TapHandler { onTapped: rail.switchProduct() }
+
+            Column {
+                anchors.centerIn: parent
+                spacing: 2
+                Icon {
+                    text: Icons.reset
+                    size: 16
+                    color: swHover.hovered ? Theme.textSecondary : Theme.textDim
+                    anchors.horizontalCenter: parent.horizontalCenter
+                }
+                Text {
+                    text: "切换产品"
+                    color: swHover.hovered ? Theme.textSecondary : Theme.textDim
+                    font.family: TypeScale.family
+                    font.pointSize: TypeScale.caption
+                    anchors.horizontalCenter: parent.horizontalCenter
+                }
+            }
+        }
+
+        Text {
+            text: typeof appVersion !== "undefined" ? "v" + appVersion : "dev"
+            color: Theme.textDim
+            font.family: "Consolas"
+            font.pointSize: TypeScale.caption
+            anchors.horizontalCenter: parent.horizontalCenter
         }
     }
 }

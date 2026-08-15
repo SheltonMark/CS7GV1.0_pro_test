@@ -81,6 +81,8 @@ Item {
 
     ListModel { id: flowLog }
 
+    ConfirmDialog { id: confirm }
+
     // 单行核对项
     component CheckRow: RowLayout {
         property bool ok: false
@@ -247,7 +249,9 @@ Item {
                             kind: root.done ? "normal" : "primary"
                             enabled: root.allPass && !root.writing && !root.done
                             width: 176
-                            onClicked: root.writeInspectStage()
+                            onClicked: confirm.ask("写入检查标识？",
+                                "将写入检查完成时间戳（Stage=4），完成后整机产测通过判据满足。",
+                                function () { root.writeInspectStage() })
                         }
 
                         Text {

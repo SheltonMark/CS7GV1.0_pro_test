@@ -8,6 +8,8 @@ import QtQuick.Layouts
 Item {
     property bool semi: false
 
+    ConfirmDialog { id: confirm }
+
     // 实际下发行集(规则4) = profile 固定项 ∩ 设备 SupportedItems:
     // - profile 要求而设备未上报 → state 覆写为 5(缺能力,标红,计不通过),不静默跳过
     // - 设备上报而 profile 不含 → 不出现在列表(不下发)
@@ -136,6 +138,10 @@ Item {
                     AppButton {
                         text: "跳过当前项"
                         glyph: Icons.skip
+                        // 跳过=质量口径的人工决定 → 确认;开始自动化测试可重来,不设卡
+                        onClicked: confirm.ask("跳过当前项？",
+                            "该测试项将标记为跳过并继续下一项，跳过记录会进产测台账。",
+                            function () { /* 真实实现:跳过并推进 */ })
                     }
                 }
             }

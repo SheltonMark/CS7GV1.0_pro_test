@@ -9,7 +9,6 @@ Rectangle {
     property bool online: true
     // 设备上报 ProductId 与会话产品不符(规则5)
     property bool mismatch: false
-    signal switchProduct()
 
     color: Theme.bg
 
@@ -86,15 +85,9 @@ Rectangle {
             }
         }
 
-        AppButton {
-            text: "切换产品"
-            glyph: Icons.reset
-            implicitHeight: Theme.hit - 8
-            anchors.verticalCenter: parent.verticalCenter
-            onClicked: switchProduct()
-        }
-
         // 设备 SN 用 hero 字号 —— 产线核对最频繁的字段
+        // (切换产品是会话级低频动作,放导航栏底部;顶栏右侧只留设备状态,
+        //  高频瞟一眼的信息不和动作按钮混排 —— 混排迟早误触)
         Column {
             spacing: 0
             Text {

@@ -53,6 +53,7 @@ qt_add_qml_module(app_ptest
         qml/Icon.qml
         qml/AppButton.qml
         qml/Card.qml
+        qml/ConfirmDialog.qml
         qml/FieldRow.qml
         qml/TestItemRow.qml
         qml/ResultBanner.qml

@@ -46,6 +46,7 @@ ApplicationWindow {
                 id: rail
                 width: 96
                 anchors { left: parent.left; top: parent.top; bottom: parent.bottom }
+                onSwitchProduct: switchDialog.open()
             }
 
             TopBar {
@@ -56,7 +57,6 @@ ApplicationWindow {
                 isStation: rail.currentIndex <= 4
                 online: true
                 mismatch: win.mismatch
-                onSwitchProduct: switchDialog.open()
             }
 
             StackLayout_ {

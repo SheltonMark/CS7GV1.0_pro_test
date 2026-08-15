@@ -9,6 +9,8 @@ Item {
     id: root
     property bool archived: false
 
+    ConfirmDialog { id: confirm }
+
     RowLayout {
         anchors.fill: parent
         anchors.margins: Theme.s5
@@ -143,8 +145,19 @@ Item {
                 Row {
                     anchors { left: parent.left; top: parent.top }
                     spacing: Theme.s3
-                    AppButton { text: "恢复默认配置"; glyph: Icons.reset; width: 168 }
-                    AppButton { text: "定时重启"; glyph: Icons.reboot; width: 146; enabled: false }
+                    AppButton {
+                        text: "恢复默认配置"; glyph: Icons.reset; width: 168
+                        // 覆写设备全部持久化配置 → 确认
+                        onClicked: confirm.ask("恢复默认配置？",
+                            "设备全部持久化配置将覆写回出厂值（SetDefaultDevConfigs）。",
+                            function () { /* 真实实现:下发恢复默认 */ })
+                    }
+                    AppButton {
+                        text: "定时重启"; glyph: Icons.reboot; width: 146; enabled: false
+                        onClicked: confirm.ask("定时重启？",
+                            "设备将按配置延时重启（须先恢复默认成功）。",
+                            function () { /* 真实实现:下发 Reboot(delay) */ })
+                    }
                     Text {
                         text: "重启须在恢复默认成功之后"
                         color: Theme.textDim

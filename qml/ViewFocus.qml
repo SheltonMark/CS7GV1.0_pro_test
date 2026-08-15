@@ -5,6 +5,8 @@ import QtQuick.Layouts
 
 // 调焦工位 —— 画面是主角,占最大面积。无尘室里工人边转镜头边看这一屏。
 Item {
+    ConfirmDialog { id: confirm }
+
     RowLayout {
         anchors.fill: parent
         anchors.margins: Theme.s5
@@ -123,6 +125,10 @@ Item {
                     glyph: Icons.save
                     kind: "primary"
                     Layout.preferredWidth: 204
+                    // 写设备状态 → 必须确认(误触=台账里多一条错误时间戳)
+                    onClicked: confirm.ask("写入调焦标识？",
+                        "将向设备写入调焦完成时间戳（Stage=1，只增不覆盖）。",
+                        function () { /* 真实实现:下发 PtestWriteStage(1) */ })
                 }
             }
         }
@@ -162,8 +168,19 @@ Item {
 
                     Row {
                         spacing: Theme.s3
-                        AppButton { text: "听到了"; glyph: Icons.pass; kind: "primary"; width: 116 }
-                        AppButton { text: "没听到"; glyph: Icons.fail; width: 116 }
+                        // 人工判定 → 确认(这一下就是咪头项的最终结论,误触即错判)
+                        AppButton {
+                            text: "听到了"; glyph: Icons.pass; kind: "primary"; width: 116
+                            onClicked: confirm.ask("咪头判定：通过？",
+                                "确认从电脑听到了设备咪头采集的声音，该项记为通过。",
+                                function () { /* 真实实现:记录咪头=通过 */ })
+                        }
+                        AppButton {
+                            text: "没听到"; glyph: Icons.fail; width: 116
+                            onClicked: confirm.ask("咪头判定：不通过？",
+                                "该项将记为失败，设备转维修排查咪头。",
+                                function () { /* 真实实现:记录咪头=失败 */ })
+                        }
                     }
                 }
             }
