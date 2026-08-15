@@ -13,6 +13,27 @@ Item {
 
     ConfirmDialog { id: confirm }
 
+    // 写调焦标识 + 结果回执。设备回包才算成功;写完把时间戳显示出来,
+    // 工人能核对实际写进去的值,而不是只看一句"成功"。
+    property string writtenStamp: ""
+
+    function doWriteStage() { writeTimer.restart() }
+
+    Timer {
+        id: writeTimer
+        interval: 700               // demo:模拟 PC→云端→设备 往返
+        onTriggered: {
+            var d = new Date();
+            function p2(n) { return n < 10 ? "0" + n : "" + n; }
+            root.writtenStamp = "" + d.getFullYear() + p2(d.getMonth() + 1)
+                + p2(d.getDate()) + p2(d.getHours()) + p2(d.getMinutes())
+                + p2(d.getSeconds());
+            toast.show("调焦标识写入成功  " + root.writtenStamp, true);
+        }
+    }
+
+    Toast { id: toast }
+
     RowLayout {
         anchors.fill: parent
         anchors.margins: Theme.s5
@@ -23,89 +44,13 @@ Item {
             Layout.fillHeight: true
             spacing: Theme.s4
 
-            // 预览区。真实实现里这里换成 VideoOutput。
-            Rectangle {
+            // 预览区。真实实现里 LivePreview 内部换成 VideoOutput。
+            // 双击 → 全屏（Main 顶层的 liveFull 层，Esc 退出）。
+            LivePreview {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                color: "#0B0D10"
-                radius: Theme.radiusLg
-                border.width: 1
-                border.color: Theme.border
-
-                // 构图辅助线:三分法,帮工人对中
-                Repeater {
-                    model: 2
-                    Rectangle {
-                        required property int index
-                        color: Qt.rgba(1, 1, 1, 0.07)
-                        width: 1
-                        height: parent.height
-                        x: parent.width * (index + 1) / 3
-                    }
-                }
-                Repeater {
-                    model: 2
-                    Rectangle {
-                        required property int index
-                        color: Qt.rgba(1, 1, 1, 0.07)
-                        height: 1
-                        width: parent.width
-                        y: parent.height * (index + 1) / 3
-                    }
-                }
-
-                Column {
-                    anchors.centerIn: parent
-                    spacing: Theme.s3
-
-                    BusyIndicator {
-                        running: true
-                        implicitWidth: 44
-                        implicitHeight: 44
-                        anchors.horizontalCenter: parent.horizontalCenter
-                    }
-                    Text {
-                        text: "XP2P 建联中…"
-                        color: Theme.textSecondary
-                        font.family: TypeScale.family
-                        font.pointSize: TypeScale.body
-                        anchors.horizontalCenter: parent.horizontalCenter
-                    }
-                    Text {
-                        text: "demo 无真实码流"
-                        color: Theme.textDim
-                        font.family: TypeScale.family
-                        font.pointSize: TypeScale.caption
-                        anchors.horizontalCenter: parent.horizontalCenter
-                    }
-                }
-
-                // 左上角实时标记
-                Row {
-                    anchors { left: parent.left; top: parent.top; margins: Theme.s4 }
-                    anchors.leftMargin: Theme.s4
-                    anchors.topMargin: Theme.s4
-                    spacing: Theme.s2
-
-                    Rectangle {
-                        width: 8; height: 8; radius: 4
-                        color: Theme.fail
-                        anchors.verticalCenter: parent.verticalCenter
-                        SequentialAnimation on opacity {
-                            running: true; loops: Animation.Infinite
-                            NumberAnimation { to: 0.2; duration: 800 }
-                            NumberAnimation { to: 1.0; duration: 800 }
-                        }
-                    }
-                    Text {
-                        text: "LIVE"
-                        color: Theme.textPrimary
-                        font.family: TypeScale.family
-                        font.pointSize: TypeScale.caption
-                        font.weight: TypeScale.weightBold
-                        font.letterSpacing: 1.5
-                    }
-                }
+                showGrid: true
+                onFullscreenRequested: liveFull.open("调焦 · 实时画面")
             }
 
             RowLayout {
@@ -136,7 +81,7 @@ Item {
                     // 写设备状态 → 必须确认(误触=台账里多一条错误时间戳)
                     onClicked: confirm.ask("写入调焦标识？",
                         "将向设备写入调焦完成时间戳（Stage=1，只增不覆盖）。",
-                        function () { /* 真实实现:下发 PtestWriteStage(1) */ })
+                        function () { root.doWriteStage() })
                 }
             }
         }

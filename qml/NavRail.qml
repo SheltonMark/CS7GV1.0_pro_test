@@ -24,12 +24,14 @@ Rectangle {
             out.push({ key: s.title, sub: s.sub, icon: iconFor(s.key),
                        pending: s.pending === true });
         }
+        out.push({ key: "批次文件", sub: "导入/导出", icon: Icons.save, pending: false });
         out.push({ key: "关于", sub: "版本", icon: Icons.navAbout, pending: false });
         return out;
     }
 
-    // 关于页在 entries 里的索引(= 工位数)
-    readonly property int aboutIndex: stations.length
+    // 非工位页索引:批次文件、关于依次排在工位之后
+    readonly property int batchIndex: stations.length
+    readonly property int aboutIndex: stations.length + 1
 
     // 坑 2:单例属性初始化不能调自定义函数 —— 此处 rail 是普通组件不是单例，
     // 且 entries 是绑定表达式而非单例属性初始化，安全。
@@ -228,6 +230,48 @@ Rectangle {
                 Text {
                     text: "切换产品"
                     color: swHover.hovered ? Theme.textSecondary : Theme.textDim
+                    font.family: TypeScale.family
+                    font.pointSize: TypeScale.caption
+                    anchors.horizontalCenter: parent.horizontalCenter
+                }
+            }
+        }
+
+        // 批次文件页(导入 InputData1 / 导出 InputData2)。所有角色可用 ——
+        // 批次级动作,不属于任何工位,故与关于页一样放底部区。
+        Item {
+            id: batchCell
+            width: parent.width
+            height: 50
+
+            readonly property bool active: rail.currentIndex === rail.batchIndex
+
+            Rectangle {
+                anchors.fill: parent
+                anchors.leftMargin: Theme.s2
+                anchors.rightMargin: Theme.s2
+                radius: Theme.radius
+                color: batchCell.active ? Theme.brandWash
+                       : (bfHover.hovered ? Qt.rgba(1, 1, 1, 0.05) : "transparent")
+                Behavior on color { ColorAnimation { duration: Theme.durFast } }
+            }
+            HoverHandler { id: bfHover }
+            TapHandler { onTapped: rail.currentIndex = rail.batchIndex }
+
+            Column {
+                anchors.centerIn: parent
+                spacing: 2
+                Icon {
+                    text: Icons.save
+                    size: 16
+                    color: batchCell.active ? Theme.brand
+                           : (bfHover.hovered ? Theme.textSecondary : Theme.textDim)
+                    anchors.horizontalCenter: parent.horizontalCenter
+                }
+                Text {
+                    text: "批次文件"
+                    color: batchCell.active ? Theme.textPrimary
+                           : (bfHover.hovered ? Theme.textSecondary : Theme.textDim)
                     font.family: TypeScale.family
                     font.pointSize: TypeScale.caption
                     anchors.horizontalCenter: parent.horizontalCenter

@@ -29,17 +29,54 @@ Card {
 
     signal allSettled()
 
-    // 六条目视 + 一条听音。指示灯要测四个状态(红/蓝/双色闪烁),
-    // 不是一行 —— 评审表 §1.3 逐条下发,判定也应逐条。
+    // 八条人工判定。共同点：设备只能回报"指令已执行"，**现象只有人能确认**。
+    // 每条都配一个「测试」按钮 —— 点它才下发（PC → 云端 → 设备），
+    // 设备做出动作后由工人判正常/异常。判定按钮在下发前禁用，
+    // 防止不测就点"正常"（这是产测台账失真的常见来源）。
     readonly property var checks: [
         { key: "led_red",   group: "指示灯", label: "红灯常亮",        glyph: Icons.light },
         { key: "led_blue",  group: "指示灯", label: "蓝灯常亮",        glyph: Icons.light },
         { key: "led_blink", group: "指示灯", label: "双色闪烁 500ms",  glyph: Icons.light },
         // 无红外灯条目 —— CS7G 是全彩夜视,用白光补光,没有 IR 灯硬件。
         { key: "white",     group: "白光灯", label: "亮度 100 发光",   glyph: Icons.whiteLight },
-        { key: "audio",     group: "喇叭 + 咪头", label: "放音后能听到，且对着设备说话也能听到",
-          glyph: Icons.speaker, loopback: true }
+        // 喇叭与咪头拆成两条 —— 不同硬件、不同故障点：喇叭坏=放音听不到，
+        // 咪头坏=说话对方听不到。合成一条判不合格时无法区分该换哪个器件。
+        { key: "speaker",   group: "喇叭",   label: "能从设备听到提示音",
+          glyph: Icons.speaker },
+        { key: "mic",       group: "咪头",   label: "对着设备说话，能从电脑听到自己的声音",
+          glyph: Icons.mic },
+        // 云台与复位按键同样改人工：云台"转到位、无异响、无卡顿"固件测不出
+        //（电机堵转但电流正常的虚位它感知不到）；复位键要人去按，
+        // 设备只能上报"收到按键事件"，按键手感/回弹得人手判断。
+        { key: "gimbal",    group: "云台",   label: "上下左右转动到位，无异响、无卡顿",
+          glyph: Icons.gimbal },
+        { key: "reset_key", group: "复位按键", label: "按住复位键 3 秒，设备应上报按键事件",
+          glyph: Icons.button }
     ]
+
+    // 每项是否已下发测试指令。未下发 → 判定按钮禁用。
+    property var dispatched: ({})
+    // 正在下发的项（demo 里模拟云端往返延迟）
+    property string pendingKey: ""
+
+    function dispatch(key) {
+        pendingKey = key;
+        dispatchTimer.key = key;
+        dispatchTimer.restart();
+    }
+
+    Timer {
+        id: dispatchTimer
+        property string key: ""
+        interval: 900          // demo：模拟 PC→云端→设备 的往返
+        onTriggered: {
+            var d = {};
+            for (var k in panel.dispatched) d[k] = panel.dispatched[k];
+            d[key] = true;
+            panel.dispatched = d;
+            panel.pendingKey = "";
+        }
+    }
 
     readonly property int settledCount: {
         var n = 0;
@@ -62,7 +99,13 @@ Card {
         if (allDone) allSettled();
     }
 
-    function reset() { verdicts = ({}) }
+    // 换机器要一起清 dispatched —— 否则上一台的"已下发"状态残留,
+    // 新机器不测就能直接点"正常"。
+    function reset() {
+        verdicts = ({});
+        dispatched = ({});
+        pendingKey = "";
+    }
 
     ConfirmDialog { id: confirm }
 
@@ -73,7 +116,7 @@ Card {
         Text {
             Layout.fillWidth: true
             text: panel.ready
-                  ? "设备已按下列状态动作，逐条确认实际现象。设备回报「指令已执行」不代表硬件正常。"
+                  ? "逐条点「测试」下发指令，设备动作后判定实际现象。设备回报「指令已执行」不代表硬件正常。"
                   : "自动项完成并拉流后开放判定。"
             color: panel.ready ? Theme.textSecondary : Theme.textDim
             font.family: TypeScale.family
@@ -130,19 +173,28 @@ Card {
                     }
                 }
 
-                // 喇叭+咪头一步双验(P10-③):放音听到 = 喇叭✓+咪头✓+音频链路✓
+                // 「测试」= 下发本项指令（PC → 云端 → 设备）。设备动作后才有现象可判，
+                // 所以它是每一项的入口；下发中显示进行态，完成后可重复点（重测）。
                 AppButton {
-                    visible: modelData.loopback === true
-                    text: "放音"
-                    glyph: Icons.speaker
+                    readonly property bool sending: panel.pendingKey === modelData.key
+                    readonly property bool done: panel.dispatched[modelData.key] === true
+                    text: sending ? "下发中…" : (done ? "重测" : "测试")
+                    glyph: sending ? Icons.reset : modelData.glyph
+                    kind: done ? "normal" : "primary"
+                    enabled: panel.ready && !sending
                     implicitHeight: Theme.hit - 8
-                    onClicked: { /* 真实实现:Item=7 Op=4 放音 */ }
+                    Layout.preferredWidth: 96
+                    // 真实实现:按 key 映射到 PtestPeripheralTest 的 Item/Op 下发
+                    onClicked: panel.dispatch(modelData.key)
                 }
 
+                // 判定按钮:必须先「测试」下发过才可点 ——
+                // 否则台账里会出现"没测就判通过"的记录。
                 AppButton {
                     text: "正常"
                     glyph: Icons.pass
                     kind: verdict === true ? "primary" : "normal"
+                    enabled: panel.dispatched[modelData.key] === true
                     implicitHeight: Theme.hit - 8
                     onClicked: panel.setVerdict(modelData.key, true)
                 }
@@ -151,6 +203,7 @@ Card {
                     text: "异常"
                     glyph: Icons.fail
                     kind: verdict === false ? "danger" : "normal"
+                    enabled: panel.dispatched[modelData.key] === true
                     implicitHeight: Theme.hit - 8
                     // 判不良是终局结论,要确认
                     onClicked: confirm.ask("判定异常？",

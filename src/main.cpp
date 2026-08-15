@@ -30,6 +30,10 @@ int main(int argc, char *argv[])
     ctx->setContextProperty(QStringLiteral("buildDate"),  QStringLiteral(APP_BUILD_DATE));
     ctx->setContextProperty(QStringLiteral("buildType"),  QStringLiteral(APP_BUILD_TYPE));
     ctx->setContextProperty(QStringLiteral("qtVersion"),  QString::fromLatin1(qVersion()));
+    // 安装目录：批次文件页要据此定位随包发的 sample/ 样例文件。
+    // QML 侧没有取程序目录的 API，只能从这里注入。
+    ctx->setContextProperty(QStringLiteral("applicationDirPath"),
+                            QCoreApplication::applicationDirPath());
 
     engine.loadFromModule("ptest", "Main");
     if (engine.rootObjects().isEmpty())

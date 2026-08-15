@@ -76,10 +76,13 @@ Item {
             flowLog.setProperty(0, "detail", "ok");
             root.writing = false;
             root.done = true;
+            toast.show("检查标识写入成功  " + root.inspectTs, true);
         }
     }
 
     ListModel { id: flowLog }
+
+    Toast { id: toast }
 
     ConfirmDialog { id: confirm }
 

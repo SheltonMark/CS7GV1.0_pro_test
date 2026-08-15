@@ -66,6 +66,11 @@ rm -rf "$DIST_WORK"/qml/QtQuick/Controls/Imagine \
        "$DIST_WORK"/qml/QtQuick/Controls/iOS \
        "$DIST_WORK"/translations
 
+# 样例批次文件随包发 —— 同事拿到包就能试「导入 InputData1」，
+# 不用先去产线要一份真文件。放 sample/ 与程序目录分开，不会被误当配置。
+mkdir -p "$DIST_WORK/sample"
+cp "$HERE/resources/sample/inputdata1_sample.txt" "$DIST_WORK/sample/"
+
 # 注意：opengl32sw.dll（约 20MB）是软件 OpenGL 兜底，故意保留。
 # 产线电脑常是低配机/显卡驱动不全/远程桌面登录，缺它会白屏或崩，
 # 省这 20MB 不值得拿停线风险换。

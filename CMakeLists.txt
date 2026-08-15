@@ -5,7 +5,7 @@ cmake_minimum_required(VERSION 3.21)
 #
 # 版本号是产线工具的硬要求：界面要看得到，将来每条产测记录也要带上它，
 # 否则批量误判无法追溯是哪个版本干的。此处是唯一来源。
-project(ptest_pc_client VERSION 0.1.1 LANGUAGES CXX)
+project(ptest_pc_client VERSION 0.1.4 LANGUAGES CXX)
 
 find_package(Qt6 6.7 REQUIRED COMPONENTS Quick QuickControls2)
 
@@ -16,6 +16,12 @@ qt_standard_project_setup(REQUIRES 6.7)
 string(TIMESTAMP BUILD_DATE "%Y-%m-%d" UTC)
 
 qt_add_executable(app_ptest src/main.cpp)
+
+# ⚠️ src/ 必须进包含路径。qt_add_qml_module 生成的类型注册文件用
+# `#if __has_include(<file_io.hpp>)` 尖括号查找带 QML_ELEMENT 的头，
+# 找不到就静默跳过 include、然后报 "'FileIo' was not declared in this scope"
+# —— 错误信息指向生成的文件，看不出根因是包含路径。
+target_include_directories(app_ptest PRIVATE src)
 
 # qt_add_qml_module 只带进 Qml 依赖；QGuiApplication 来自 Gui、
 # QQuickStyle 来自 QuickControls2，必须显式链，否则连头文件都找不到。
@@ -61,15 +67,24 @@ qt_add_qml_module(app_ptest
         qml/NavRail.qml
         qml/TopBar.qml
         qml/StepList.qml
+        qml/LivePreview.qml
+        qml/Toast.qml
+        qml/LiveFullscreen.qml
         # 页面
         qml/ViewFocus.qml
         qml/ViewFinished.qml
         qml/ViewInspect.qml
         qml/ViewRepair.qml
         qml/ViewPending.qml
+        qml/ViewBatchFiles.qml
         qml/ViewAbout.qml
         qml/ProductGate.qml
         qml/ViewLogin.qml
+    SOURCES
+        # 批次文件读写。QML 无文件写入 API，只把读/写下沉到 C++，
+        # 解析与列语义留在 QML（列定义还没和产线定死，改 QML 不必重编 C++）。
+        src/file_io.hpp
+        src/file_io.cpp
     RESOURCES
         # logo 与 QML 同目录，QML 里直接写 "logo.png" 即可
         resources/logo.png
