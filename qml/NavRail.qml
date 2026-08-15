@@ -14,6 +14,9 @@ Rectangle {
     readonly property var stations: Session.profile && Session.profile.stations
                                     ? Session.profile.stations : []
 
+    // entries 仍含关于页(索引 = stations.length),Main 的页面栈据此路由;
+    // 但它渲染在**底部区**而非工位列表里 —— 关于不是工位,不该混在工位流中间
+    // 打断"我在第几站"的判断。工位列表只画 stations。
     readonly property var entries: {
         var out = [];
         for (var i = 0; i < stations.length; ++i) {
@@ -24,6 +27,9 @@ Rectangle {
         out.push({ key: "关于", sub: "版本", icon: Icons.navAbout, pending: false });
         return out;
     }
+
+    // 关于页在 entries 里的索引(= 工位数)
+    readonly property int aboutIndex: stations.length
 
     // 坑 2:单例属性初始化不能调自定义函数 —— 此处 rail 是普通组件不是单例，
     // 且 entries 是绑定表达式而非单例属性初始化，安全。
@@ -69,13 +75,14 @@ Rectangle {
         }
         spacing: Theme.s1
 
+        // 只画工位(关于页在底部区)
         Repeater {
-            model: rail.entries
+            model: rail.stations.length
 
             Item {
                 id: cell
                 required property int index
-                required property var modelData
+                readonly property var modelData: rail.entries[index]
 
                 readonly property bool active: index === rail.currentIndex
 
@@ -221,6 +228,50 @@ Rectangle {
                 Text {
                     text: "切换产品"
                     color: swHover.hovered ? Theme.textSecondary : Theme.textDim
+                    font.family: TypeScale.family
+                    font.pointSize: TypeScale.caption
+                    anchors.horizontalCenter: parent.horizontalCenter
+                }
+            }
+        }
+
+        // 关于页。放在切换产品下方 —— 它是页面(有选中态)而不是动作,
+        // 所以保留品牌色选中样式,与上面两个纯动作项区分。
+        Item {
+            id: aboutCell
+            width: parent.width
+            height: 50
+
+            // ⚠️ 用具名 id 引用，不用 parent.parent —— 后者在 Column 里层级
+            // 数错会把样式绑到兄弟项上（表现为"切换产品"被误高亮成选中态）。
+            readonly property bool active: rail.currentIndex === rail.aboutIndex
+
+            Rectangle {
+                anchors.fill: parent
+                anchors.leftMargin: Theme.s2
+                anchors.rightMargin: Theme.s2
+                radius: Theme.radius
+                color: aboutCell.active ? Theme.brandWash
+                       : (abHover.hovered ? Qt.rgba(1, 1, 1, 0.05) : "transparent")
+                Behavior on color { ColorAnimation { duration: Theme.durFast } }
+            }
+            HoverHandler { id: abHover }
+            TapHandler { onTapped: rail.currentIndex = rail.aboutIndex }
+
+            Column {
+                anchors.centerIn: parent
+                spacing: 2
+                Icon {
+                    text: Icons.navAbout
+                    size: 16
+                    color: aboutCell.active ? Theme.brand
+                           : (abHover.hovered ? Theme.textSecondary : Theme.textDim)
+                    anchors.horizontalCenter: parent.horizontalCenter
+                }
+                Text {
+                    text: "关于"
+                    color: aboutCell.active ? Theme.textPrimary
+                           : (abHover.hovered ? Theme.textSecondary : Theme.textDim)
                     font.family: TypeScale.family
                     font.pointSize: TypeScale.caption
                     anchors.horizontalCenter: parent.horizontalCenter
