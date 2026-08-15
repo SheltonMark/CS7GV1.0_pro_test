@@ -67,6 +67,7 @@ qt_add_qml_module(app_ptest
         qml/ViewRepair.qml
         qml/ViewAbout.qml
         qml/ProductGate.qml
+        qml/ViewLogin.qml
     RESOURCES
         # logo 与 QML 同目录，QML 里直接写 "logo.png" 即可
         resources/logo.png

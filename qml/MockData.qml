@@ -50,6 +50,14 @@ QtObject {
     readonly property string finishTime:  "20260815103501120"
     readonly property string inspectTime: ""
 
+    // ---- 操作者账户(mock,明文仅演示;真实=SQLite+PBKDF2 加盐哈希,docs/plan P5) ----
+    // 工号是字符串(前导零);超级用户唯一内置。
+    readonly property var users: [
+        { id: "0045009", name: "马顺涛",     role: "super",    pwd: "1234" },
+        { id: "0038165", name: "肖洁",       role: "engineer", pwd: "1234" },
+        { id: "9000001", name: "示例技术员", role: "tech",     pwd: "1234" }
+    ]
+
     // ---- 负责人(关于页) ----
     // 假数据。真实工号要从产线台账拿。
     // ⚠️ 工号 0038165 必须是字符串。前导零一旦被当数字处理就会丢成 38165，

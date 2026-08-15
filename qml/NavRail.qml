@@ -114,6 +114,7 @@ Rectangle {
     // 底部:切换产品(会话级动作,不是页面 —— 用分隔线和暗色与工位项区分;
     // 点击走二次确认,由 Main 处理) + 版本号
     signal switchProduct()
+    signal switchUser()
 
     Column {
         anchors {
@@ -131,7 +132,41 @@ Rectangle {
 
         Item {
             width: parent.width
-            height: 52
+            height: 50
+
+            Rectangle {
+                anchors.fill: parent
+                anchors.leftMargin: Theme.s2
+                anchors.rightMargin: Theme.s2
+                radius: Theme.radius
+                color: suHover.hovered ? Qt.rgba(1, 1, 1, 0.05) : "transparent"
+                Behavior on color { ColorAnimation { duration: Theme.durFast } }
+            }
+            HoverHandler { id: suHover }
+            TapHandler { onTapped: rail.switchUser() }
+
+            Column {
+                anchors.centerIn: parent
+                spacing: 2
+                Icon {
+                    text: Icons.person
+                    size: 16
+                    color: suHover.hovered ? Theme.textSecondary : Theme.textDim
+                    anchors.horizontalCenter: parent.horizontalCenter
+                }
+                Text {
+                    text: "切换用户"
+                    color: suHover.hovered ? Theme.textSecondary : Theme.textDim
+                    font.family: TypeScale.family
+                    font.pointSize: TypeScale.caption
+                    anchors.horizontalCenter: parent.horizontalCenter
+                }
+            }
+        }
+
+        Item {
+            width: parent.width
+            height: 50
 
             Rectangle {
                 anchors.fill: parent

@@ -24,17 +24,23 @@ ApplicationWindow {
     readonly property bool mismatch: Session.profile !== null
         && MockData.deviceProductId !== Session.profile.productId
 
-    // 启动门:未选产品时的唯一一屏(规则1)
+    // 启动流程 = 操作者登录 → 产品选择门 → 工位主界面
+    ViewLogin {
+        anchors.fill: parent
+        visible: Session.user === null
+    }
+
     ProductGate {
         anchors.fill: parent
-        visible: Session.profile === null
+        visible: Session.user !== null && Session.profile === null
     }
 
     // 主界面挂 Loader:切换产品 = Session.profile 置空 → 整棵 UI 销毁重建,
     // 设备连接/指令流水/页面状态随会话一起清空,不做逐项清理(会漏)。
+    // 切换用户只清 Session.user:回登录页换班,profile 保留,登录后直回主界面。
     Loader {
         anchors.fill: parent
-        active: Session.profile !== null
+        active: Session.user !== null && Session.profile !== null
         sourceComponent: mainUi
     }
 
@@ -47,6 +53,7 @@ ApplicationWindow {
                 width: 96
                 anchors { left: parent.left; top: parent.top; bottom: parent.bottom }
                 onSwitchProduct: switchDialog.open()
+                onSwitchUser: Session.user = null   // 保 profile,回登录页即换班
             }
 
             TopBar {

@@ -46,11 +46,14 @@ Rectangle {
         Text {
             // 工具版本挂在这里：产线出批量误判要能追溯是哪个版本干的。
             // 将来每条产测记录也要带上同一个值。
-            text: Session.profile
-                  ? Session.profile.name + "  " + Session.profile.desc
-                    + "  ·  " + Session.profile.productId
-                    + "      工具 v" + (typeof appVersion !== "undefined" ? appVersion : "dev")
-                  : ""
+            text: (Session.profile
+                   ? Session.profile.name + "  " + Session.profile.desc
+                     + "  ·  " + Session.profile.productId
+                   : "")
+                  + (Session.user
+                     ? "  ·  " + Session.user.id + "（" + Session.roleLabel() + "）"
+                     : "")
+                  + "      工具 v" + (typeof appVersion !== "undefined" ? appVersion : "dev")
             color: Theme.textSecondary
             font.family: TypeScale.family
             font.pointSize: TypeScale.caption

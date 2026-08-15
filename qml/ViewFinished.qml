@@ -138,6 +138,8 @@ Item {
                     AppButton {
                         text: "跳过当前项"
                         glyph: Icons.skip
+                        // 权限矩阵:跳过=工程师+;技术员直接隐藏(SW_HIDE 惯例)
+                        visible: Session.canSkipItem
                         // 跳过=质量口径的人工决定 → 确认;开始自动化测试可重来,不设卡
                         onClicked: confirm.ask("跳过当前项？",
                             "该测试项将标记为跳过并继续下一项，跳过记录会进产测台账。",
