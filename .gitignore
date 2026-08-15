@@ -1,0 +1,5 @@
+build/
+build.stage.*/
+dist/
+dist.stage.*/
+*.zip
