@@ -75,9 +75,12 @@ QtObject {
     // 本地按评审表 §2.6 算得(zlib CRC32(DeviceSecret+ProductSecret),8位大写hex)。
     // 真实实现由 C++ 用下发时的明文算;mock 直接给相同值 = 校验通过。
     readonly property string localSecretCrc32: "7F3A9B2E"
-    // ⚠️ 运行时值,禁止硬编码(规则4)。真机首版=0x6A7(七项);
-    // mock 故意去掉 bit10(SD)=0x2A7,演示"profile 要求而设备未上报→标红缺能力"。
-    readonly property int supportedItems: 0x2A7
+    // ⚠️ 运行时值,禁止硬编码(规则4)。
+    // 真机当前=0x6A5:指示灯(0)/白光(2)/电池(5)/喇叭(7)/4G(9)/SD(10) 六项已接线。
+    // 无 bit1(红外)与 bit3(日夜) —— 本产品无此硬件。
+    // "profile 要求而设备未上报→标红缺能力"这条路径不用造假来演示:
+    // 复位按键(4,待 MCU)/云台(6,待电机)/咪头(8,待分贝采集) 天然就是差集。
+    readonly property int supportedItems: 0x6A5
 
     // 四阶段完成时间戳(空串 = 未完成)
     readonly property string focusTime:   "20260815094512380"
@@ -120,7 +123,8 @@ QtObject {
         { item: 7,  name: "喇叭",      detail: "放音 ptest_speaker.aac", state: 1, reading: "" },
         { item: 8,  name: "咪头",      detail: "采集音频返回分贝",     state: 0, reading: "" },
         { item: 9,  name: "4G 信号",   detail: "双槽 / 运营商 / 拨号",  state: 0, reading: "" },
-        { item: 10, name: "SD 卡",     detail: "在位 + 读写校验",      state: 3, reading: "state=absent" }
+        { item: 10, name: "SD 卡",     detail: "在位 + 读写校验",      state: 2,
+          reading: "size_mb=1, write=8.5MB/s, read=17.2MB/s, verify=ok" }
     ]
 
     // ---- 工位步骤(线性流程,一次只让工人面对一步) ----

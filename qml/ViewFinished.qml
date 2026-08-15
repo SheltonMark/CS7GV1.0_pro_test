@@ -32,9 +32,13 @@ Item {
     readonly property var autoRows: rows.filter(r => manualBits.indexOf(r.item) < 0)
     readonly property var manualRows: rows.filter(r => manualBits.indexOf(r.item) >= 0)
 
+    // 只统计自动项 —— 卡片标题写的就是"自动测试项",下面渲染的也是 autoRows。
+    // 若按全部 rows 统计,头部会显示 9 项的计数而列表只有 6 行,工人对不上账。
+    // 人工项的结论归 ManualVerifyPanel(它自己有 settledCount/anyFail),
+    // 写标识按钮同时看两边,总判定不会漏项。
     readonly property var counts: {
         const c = { pass: 0, fail: 0, run: 0, wait: 0, miss: 0 };
-        rows.forEach(function (r) {
+        autoRows.forEach(function (r) {
             if (r.state === 2) c.pass++;
             else if (r.state === 3) c.fail++;
             else if (r.state === 1) c.run++;
