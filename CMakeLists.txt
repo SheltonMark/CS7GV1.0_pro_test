@@ -61,6 +61,7 @@ qt_add_qml_module(app_ptest
         # 页面
         qml/ViewFocus.qml
         qml/ViewFinished.qml
+        qml/ViewInspect.qml
         qml/ViewRepair.qml
         qml/ViewProfile.qml
         qml/ViewAbout.qml

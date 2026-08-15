@@ -11,6 +11,7 @@ Rectangle {
         { key: "调焦",   sub: "工位 1", icon: Icons.navFocus },
         { key: "准成品", sub: "工位 2", icon: Icons.navSemi },
         { key: "成品",   sub: "工位 2", icon: Icons.navFinished },
+        { key: "检查",   sub: "工位 3", icon: Icons.navInspect },
         { key: "维修",   sub: "按需",   icon: Icons.navRepair },
         { key: "产品",   sub: "配置",   icon: Icons.navProduct },
         { key: "关于",   sub: "版本",   icon: Icons.navAbout }

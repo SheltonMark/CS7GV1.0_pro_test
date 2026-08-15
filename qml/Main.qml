@@ -30,7 +30,7 @@ ApplicationWindow {
         height: 76
         anchors { left: rail.right; right: parent.right; top: parent.top }
         station: rail.entries[rail.currentIndex].key
-        isStation: rail.currentIndex <= 3
+        isStation: rail.currentIndex <= 4
         online: true
     }
 
@@ -54,11 +54,13 @@ ApplicationWindow {
         ViewFinished { anchors.fill: parent; visible: index === 2
                        opacity: visible ? 1 : 0
                        Behavior on opacity { NumberAnimation { duration: Theme.durSlow } } }
-        ViewRepair   { anchors.fill: parent; visible: index === 3; opacity: visible ? 1 : 0
+        ViewInspect  { anchors.fill: parent; visible: index === 3; opacity: visible ? 1 : 0
                        Behavior on opacity { NumberAnimation { duration: Theme.durSlow } } }
-        ViewProfile  { anchors.fill: parent; visible: index === 4; opacity: visible ? 1 : 0
+        ViewRepair   { anchors.fill: parent; visible: index === 4; opacity: visible ? 1 : 0
                        Behavior on opacity { NumberAnimation { duration: Theme.durSlow } } }
-        ViewAbout    { anchors.fill: parent; visible: index === 5; opacity: visible ? 1 : 0
+        ViewProfile  { anchors.fill: parent; visible: index === 5; opacity: visible ? 1 : 0
+                       Behavior on opacity { NumberAnimation { duration: Theme.durSlow } } }
+        ViewAbout    { anchors.fill: parent; visible: index === 6; opacity: visible ? 1 : 0
                        Behavior on opacity { NumberAnimation { duration: Theme.durSlow } } }
     }
 }

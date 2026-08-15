@@ -25,6 +25,7 @@ QtObject {
     readonly property string navFocus:    String.fromCharCode(0xE722)  // 相机
     readonly property string navSemi:     String.fromCharCode(0xE9D9)  // 波形
     readonly property string navFinished: String.fromCharCode(0xE73A)  // 勾选框
+    readonly property string navInspect:  String.fromCharCode(0xE930)  // 圆圈勾(检查)
     readonly property string navRepair:   String.fromCharCode(0xE90F)  // 扳手
     readonly property string navProduct:  String.fromCharCode(0xE7B8)  // 箱子
     readonly property string navAbout:    String.fromCharCode(0xE946)  // 信息

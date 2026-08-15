@@ -24,12 +24,17 @@ QtObject {
     readonly property string swVersion:  "V1.0.0.14"
     readonly property string hwVersion:  "A2"
     readonly property string secretCrc32:"7F3A9B2E"
+    readonly property string suid:       "SU2608A1B2C3D4E5"
+    readonly property string language:   "CN"
+    // 本地按评审表 §2.6 算得(zlib CRC32(DeviceSecret+ProductSecret),8位大写hex)。
+    // 真实实现由 C++ 用下发时的明文算;mock 直接给相同值 = 校验通过。
+    readonly property string localSecretCrc32: "7F3A9B2E"
     readonly property int supportedItems: 0x6A7   // 首版位图:七项可测
 
     // 四阶段完成时间戳(空串 = 未完成)
     readonly property string focusTime:   "20260815094512380"
     readonly property string semiTime:    "20260815101233907"
-    readonly property string finishTime:  ""
+    readonly property string finishTime:  "20260815103501120"
     readonly property string inspectTime: ""
 
     // ---- 负责人(关于页) ----
