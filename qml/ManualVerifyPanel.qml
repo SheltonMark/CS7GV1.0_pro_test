@@ -5,8 +5,8 @@ import QtQuick.Layouts
 
 // 人工判定面板。解决一个正确性问题:
 //
-// 七项可测项里有四项(指示灯/红外/白光/喇叭)设备只回 `ok`,意思是
-// "GPIO 拉高了 / 音频送进功放了" —— 灯泡烧了、红外管虚焊、喇叭线没焊上,
+// 九项外设里有三项(指示灯/白光/喇叭)设备只回 `ok`,意思是
+// "GPIO 拉高了 / 音频送进功放了" —— 灯泡烧了、白光 LED 虚焊、喇叭线没焊上,
 // 设备照样回 ok,因为固件感知不到发光和出声。
 // 直接把 Code=0 打成绿✓ = 把"指令下发成功"伪装成"硬件合格",
 // 灯不亮的机器会一路绿灯走完产测。
@@ -19,7 +19,7 @@ Card {
     id: panel
 
     title: "人工判定  ·  目视与听音"
-    titleIcon: Icons.ir
+    titleIcon: Icons.whiteLight
     fitContent: true
 
     // 判定结果:key → true(通过)/false(不通过)/undefined(未判)
@@ -35,7 +35,7 @@ Card {
         { key: "led_red",   group: "指示灯", label: "红灯常亮",        glyph: Icons.light },
         { key: "led_blue",  group: "指示灯", label: "蓝灯常亮",        glyph: Icons.light },
         { key: "led_blink", group: "指示灯", label: "双色闪烁 500ms",  glyph: Icons.light },
-        { key: "ir",        group: "红外灯", label: "手机摄像头可见发光", glyph: Icons.ir },
+        // 无红外灯条目 —— CS7G 是全彩夜视,用白光补光,没有 IR 灯硬件。
         { key: "white",     group: "白光灯", label: "亮度 100 发光",   glyph: Icons.whiteLight },
         { key: "audio",     group: "喇叭 + 咪头", label: "放音后能听到，且对着设备说话也能听到",
           glyph: Icons.speaker, loopback: true }

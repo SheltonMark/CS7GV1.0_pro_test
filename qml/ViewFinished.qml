@@ -26,7 +26,9 @@ Item {
 
     // 自动项(设备回读数,PC 比阈值可自动判) vs 人工项(设备只回 ok,
     // 真实结论在工人眼睛耳朵里)。分开的理由见 ManualVerifyPanel 头注释。
-    readonly property var manualBits: [0, 1, 2, 7]     // 指示灯/红外/白光/喇叭
+    // 人工判定项:设备只回 ok、发光/出声固件感知不到的项。
+    // CS7G 无红外灯(全彩夜视用白光补光),故只有三项。
+    readonly property var manualBits: [0, 2, 7]        // 指示灯/白光/喇叭
     readonly property var autoRows: rows.filter(r => manualBits.indexOf(r.item) < 0)
     readonly property var manualRows: rows.filter(r => manualBits.indexOf(r.item) >= 0)
 

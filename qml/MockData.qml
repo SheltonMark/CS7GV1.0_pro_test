@@ -16,7 +16,9 @@ QtObject {
     // 已实现的 key: focus/semi/finished/inspect/repair(+about 由 NavRail 恒定追加)
     readonly property var profiles: [
         { name: "CS7GV1.0", desc: "低功耗电池 IPC", productId: "5KHBENFCX2",
-          enabled: true,  items: [0, 1, 2, 5, 7, 9, 10],
+          // CS7G 实际外设 9 项(2026-08-15 确认):无红外灯(1)、无日夜切换(3)
+          //   —— 全彩夜视产品用白光补光,既没有 IR 灯也没有 IR-CUT 滤光片。
+          enabled: true,  items: [0, 2, 4, 5, 6, 7, 8, 9, 10],
           stations: [
               { key: "focus",    title: "调焦",   sub: "工位 1" },
               { key: "semi",     title: "准成品", sub: "工位 2" },
@@ -27,7 +29,8 @@ QtObject {
         // 示例:多产品工位差异。射频类产品在成品之前多三个工位,
         // 且不做调焦(无镜头对焦环节)。用于验证"切产品换工位"的正确性。
         { name: "CS8GV1.0", desc: "4G 摄像机(射频线)", productId: "8KH2RFDEMO",
-          enabled: true,  items: [0, 1, 2, 5, 7, 9, 10],
+          // 示例值:该产品有红外灯与日夜切换(常规夜视),无云台
+          enabled: true,  items: [0, 1, 2, 3, 4, 5, 7, 8, 9, 10],
           stations: [
               { key: "flow",     title: "流量",   sub: "工位 1", pending: true },
               { key: "rf",       title: "射频",   sub: "工位 2", pending: true },
@@ -54,7 +57,10 @@ QtObject {
 
     // ---- ProductTestInfo 假值 ----
     // SN = 型号前缀 + 流水号。分隔符只做"显示分组",不进数据 —— 见 snModel/snSerial。
-    readonly property string snModel:  "CS7GV1.0"
+    // 型号前缀跟随会话产品:真实 SN 的型号段本就来自被测机型,写死会让工人
+    // 在切到别的产品后看到不匹配的 SN、以为扫错了机器。
+    readonly property string snModel:
+        Session.profile ? Session.profile.name : "CS7GV1.0"
     readonly property string snSerial: "2608150042"
     readonly property string sn:       snModel + snSerial
     readonly property string deviceName: "1000000003"
@@ -104,17 +110,17 @@ QtObject {
     // ---- 11 项测试项主表(设备侧全集;实际渲染 = profile ∩ SupportedItems 决定) ----
     // state: 0 待测 1 执行中 2 通过 3 失败 4 设备不支持 5 profile要求但设备缺(标红)
     readonly property var items: [
+        // CS7G 外设 9 项。**不含红外灯(1)与日夜切换(3)** —— 本产品是全彩夜视,
+        // 用白光补光,没有 IR 灯也没有 IR-CUT。物模型枚举保留那两位供其他产品用。
         { item: 0,  name: "指示灯",    detail: "红蓝双色 + 闪烁",     state: 2, reading: "ok" },
-        { item: 1,  name: "红外灯",    detail: "开关 / 亮度 100",     state: 2, reading: "ok" },
         { item: 2,  name: "白光灯",    detail: "开关 / 亮度 100",     state: 2, reading: "ok" },
-        { item: 3,  name: "日夜切换",  detail: "本产品不启用",         state: 4, reading: "" },
-        { item: 4,  name: "复位按键",  detail: "待 MCU 链路",          state: 5, reading: "" },
-        { item: 5,  name: "电池",      detail: "电量查询",             state: 2, reading: "percent=87, external=1" },
-        { item: 6,  name: "云台",      detail: "待装电机",             state: 4, reading: "" },
+        { item: 4,  name: "复位按键",  detail: "等待按键 10s",         state: 5, reading: "" },
+        { item: 5,  name: "电池",      detail: "电量 + 低电标志",      state: 2, reading: "percent=87, external=1, low=0" },
+        { item: 6,  name: "云台",      detail: "四向转动 + 回中",      state: 5, reading: "" },
         { item: 7,  name: "喇叭",      detail: "放音 ptest_speaker.aac", state: 1, reading: "" },
-        { item: 8,  name: "咪头",      detail: "拉流人工判定",         state: 0, reading: "" },
-        { item: 9,  name: "4G 信号",   detail: "RSRP / SINR",          state: 0, reading: "" },
-        { item: 10, name: "SD 卡",     detail: "在位与状态",           state: 3, reading: "state=absent" }
+        { item: 8,  name: "咪头",      detail: "采集音频返回分贝",     state: 0, reading: "" },
+        { item: 9,  name: "4G 信号",   detail: "双槽 / 运营商 / 拨号",  state: 0, reading: "" },
+        { item: 10, name: "SD 卡",     detail: "在位 + 读写校验",      state: 3, reading: "state=absent" }
     ]
 
     // ---- 工位步骤(线性流程,一次只让工人面对一步) ----
