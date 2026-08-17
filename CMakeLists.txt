@@ -84,6 +84,7 @@ qt_add_qml_module(app_ptest
         qml/TopBar.qml
         qml/StepList.qml
         qml/LivePreview.qml
+        qml/DeviceDiscoveryPanel.qml
         qml/Toast.qml
         qml/LiveFullscreen.qml
         # 页面
@@ -118,6 +119,9 @@ qt_add_qml_module(app_ptest
         src/cloud/cloud_client.cpp
         src/cloud/factory_config.hpp
         src/cloud/factory_config.cpp
+        # 调焦设备发现:UDP 广播搜索(CP3 老协议 7320/7319),ViewFocus 页用
+        src/cloud/device_discovery.hpp
+        src/cloud/device_discovery.cpp
     RESOURCES
         # logo 与 QML 同目录，QML 里直接写 "logo.png" 即可
         resources/logo.png

@@ -95,9 +95,28 @@ int FactoryConfig::speakerRepeat() const { return nestedInt("peripheral", "speak
 
 QString FactoryConfig::rtspUrlTemplate() const
 {
-    // 默认路径按常见 RTSP 服务猜测(:554/live/main);实际以设备端 RTSP 服务
-    // 为准 —— 不对就改 factory_config.json,不用改代码。
-    return topString("rtspUrlTemplate", "rtsp://%1:554/live/main");
+    // 路径 /tenda 按老 CP3 源码核实(DlgFocusing.cpp:771);双摄机型是
+    // /tenda/ch1、/tenda/ch2 —— 换机型改 factory_config.json,不用改代码。
+    return topString("rtspUrlTemplate", "rtsp://%1:554/tenda");
+}
+
+// —— 调焦设备发现(端口/搜索字按老 CP3 源码 DlgFocusing.cpp 核实)
+// PC→设备 广播端口(SENT_UDP_PORT_BROAD)
+int FactoryConfig::discoverySendPort() const { return topInt("discoverySendPort", 7320); }
+// 设备→PC 应答端口(TRANSMIT_UDP_PORT_BROAD;协议定死回这里,不回源端口)
+int FactoryConfig::discoveryListenPort() const { return topInt("discoveryListenPort", 7319); }
+
+QString FactoryConfig::discoveryWord() const
+{
+    // 广播搜索字;多摄机型带 &1/&2 后缀选通道(DlgFocusing.cpp:1136-1144)
+    return topString("discoveryWord", "td_adjustlenstest");
+}
+
+int FactoryConfig::discoveryIntervalMs() const
+{
+    // 搜索期间重发周期。老代码是 while(TRUE)+sendto 不间断猛发,
+    // 没必要 —— 设备应答毫秒级,800ms 一发足够,还不刷爆局域网
+    return topInt("discoveryIntervalMs", 800);
 }
 
 QVariantList FactoryConfig::stationItems(const QString &productId, const QString &station,

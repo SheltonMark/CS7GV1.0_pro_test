@@ -32,6 +32,14 @@ Item {
     ConfirmDialog { id: confirm }
     Toast { id: toast }
 
+    // 局域网设备发现(UDP 广播,CP3 老协议,详见 device_discovery.hpp)。
+    // 页面级实例,非单例 —— 只有调焦工位用,7319 端口仅在搜索期间占用。
+    DeviceDiscovery { id: finder }
+
+    // 工位页常驻不销毁(Main 里只切 visible),切走页面必须停广播,
+    // 否则搜索会在后台一直发包
+    onVisibleChanged: if (!visible) finder.stop()
+
     function dv(key) {
         return devInfo[key] !== undefined && devInfo[key] !== "" ? devInfo[key] : "—";
     }
@@ -43,6 +51,24 @@ Item {
     function doWriteStage() {
         sentStamp = nowStamp17();
         writeReqId = CloudClient.writeStage(1, sentStamp);
+    }
+
+    // 双击搜索结果 = 选定该设备:停广播(目的已达成,不再打扰网络)、
+    // 填 IP、立即拉流。换台设备时再点搜索,起搜前会 clear 旧列表。
+    function pickDevice(ip) {
+        finder.stop();
+        ipField.text = ip;
+        preview.sourceUrl = "";          // 与「重新拉流」同款:先断再连
+        preview.sourceUrl = root.rtspUrl;
+    }
+
+    Connections {
+        target: finder
+        function onLastErrorChanged() {
+            // 7319 被占/被安全软件拦时工人要看到原因,不是"点了没反应"
+            if (finder.lastError.length > 0)
+                toast.show("设备搜索失败: " + finder.lastError, false);
+        }
     }
 
     Connections {
@@ -111,14 +137,44 @@ Item {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 showGrid: true
-                hint: root.rtspMode ? "RTSP 直拉（网口）· 点「开始拉流」"
+                hint: root.rtspMode ? "RTSP 直拉（网口）· 点「搜索设备」或手填 IP"
                                     : "该产品无网口，拉流走云（XP2P 待接入）"
                 onFullscreenRequested: liveFull.open("调焦 · 实时画面")
+            }
+
+            // 发现面板:搜索中或有结果且未拉流时出现;拉流一开就让位 ——
+            // 画面是主角,面板不跟它抢高度。visible 条件收在本页,
+            // 面板文件只管展示。
+            DeviceDiscoveryPanel {
+                discovery: finder
+                visible: root.rtspMode && (finder.searching
+                         || (finder.devices.length > 0 && !preview.streaming))
+                Layout.fillWidth: true
+                Layout.preferredHeight: implicitHeight
+                onPicked: ip => root.pickDevice(ip)
             }
 
             RowLayout {
                 Layout.fillWidth: true
                 spacing: Theme.s3
+
+                // 搜索设备(老 CP3 交互):UDP 广播搜索字 → 设备应答进上方
+                // 列表 → 双击拉流。手动 IP 框保留作兜底(设备端没有广播
+                // 应答服务时列表恒空,见 device_discovery.hpp 头注)。
+                AppButton {
+                    visible: root.rtspMode
+                    text: finder.searching ? "停止搜索" : "搜索设备"
+                    glyph: finder.searching ? Icons.stop : Icons.device
+                    Layout.preferredWidth: 142
+                    onClicked: {
+                        if (finder.searching) {
+                            finder.stop();
+                        } else {
+                            finder.clear();   // 新一轮不留旧结果,防误选上一台
+                            finder.start();
+                        }
+                    }
+                }
 
                 // CS7G:设备 IP(上报自动带出,可手改)。URL = 模板.arg(IP)
                 TextField {

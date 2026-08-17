@@ -15,5 +15,9 @@
     "ledBlinkMs": 500,
     "speakerRepeat": 1
   },
-  "rtspUrlTemplate": "rtsp://%1:554/live/main"
+  "rtspUrlTemplate": "rtsp://%1:554/tenda",
+  "discoverySendPort": 7320,
+  "discoveryListenPort": 7319,
+  "discoveryWord": "td_adjustlenstest",
+  "discoveryIntervalMs": 800
 }
