@@ -68,6 +68,14 @@ void MockTransport::readDeviceData(const QString & /*productId*/, const QString 
             {QStringLiteral("PtestHeartbeat"),
              QJsonObject{{QStringLiteral("Value"), 1},
                          {QStringLiteral("LastUpdate"), nowMs}}},
+            // 设备信息:调焦 RTSP 直拉要用的 IP(CS7G 网口)
+            {QStringLiteral("DeviceInformation"),
+             QJsonObject{{QStringLiteral("Value"),
+                          QJsonObject{{QStringLiteral("IpAddress"),
+                                       QStringLiteral("192.168.170.66")},
+                                      {QStringLiteral("SystemVersion"),
+                                       QStringLiteral("mock-sys-1.0")}}},
+                         {QStringLiteral("LastUpdate"), nowMs}}},
         };
         if (hasResult_) {
             data.insert(QStringLiteral("ProductTestResult"),

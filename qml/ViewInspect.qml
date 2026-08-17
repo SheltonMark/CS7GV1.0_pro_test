@@ -16,69 +16,101 @@ import QtQuick.Layouts
 Item {
     id: root
 
-    // ---- 核对项(mock 本地算;真实实现读 ProductTestInfo 后同样本地算) ----
-    readonly property bool tsFocus:  MockData.focusTime.length > 0
-    readonly property bool tsSemi:   MockData.semiTime.length > 0
-    readonly property bool tsFinish: MockData.finishTime.length > 0
+    // ---- 设备上报(ProductTestInfo 真实回读值) ----
+    property var devInfo: ({})
+    function dv(key) { return devInfo[key] !== undefined ? ("" + devInfo[key]) : ""; }
+
+    // ---- 核对项(读回后本地算) ----
+    readonly property bool tsFocus:  dv("FocusTime").length > 0
+    readonly property bool tsSemi:   dv("SemiTime").length > 0
+    readonly property bool tsFinish: dv("FinishTime").length > 0
     readonly property bool tsAll: tsFocus && tsSemi && tsFinish
     // 17 位纯数字 YYYYMMDDHHMMSSmmm:字典序 == 时间序,直接字符串比较
     readonly property bool orderOk: tsAll
-        && MockData.focusTime <= MockData.semiTime
-        && MockData.semiTime <= MockData.finishTime
+        && dv("FocusTime") <= dv("SemiTime")
+        && dv("SemiTime") <= dv("FinishTime")
 
     readonly property var infoFields: [
-        { k: "Sn",          v: MockData.sn },
-        { k: "Mac",         v: MockData.mac },
-        { k: "Uuid",        v: MockData.uuid },
-        { k: "Imei",        v: MockData.imei },
-        { k: "Suid",        v: MockData.suid },
-        { k: "Language",    v: MockData.language },
-        { k: "ProductKey",  v: MockData.productId },
-        { k: "DeviceName",  v: MockData.deviceName },
-        { k: "SecretCrc32", v: MockData.secretCrc32 }
+        { k: "Sn",          v: dv("Sn") },
+        { k: "Mac",         v: dv("Mac") },
+        { k: "Uuid",        v: dv("Uuid") },
+        { k: "Imei",        v: dv("Imei") },
+        { k: "Suid",        v: dv("Suid") },
+        { k: "Language",    v: dv("Language") },
+        { k: "ProductKey",  v: dv("ProductKey") },
+        { k: "DeviceName",  v: dv("DeviceName") },
+        { k: "SecretCrc32", v: dv("SecretCrc32") }
     ]
     readonly property bool infoOk: infoFields.every(f => f.v.length > 0)
-    // §2.6:zlib CRC32(DeviceSecret明文+ProductSecret明文),8 位大写十六进制。
-    // 计算在 C++ 侧做(QML 无 zlib);这里比对设备回报值与本地算得值。
-    readonly property bool crcOk: MockData.secretCrc32 === MockData.localSecretCrc32
+    // §2.6:zlib CRC32(DeviceSecret明文+ProductSecret明文),8 位大写 hex。
+    // 本地明文按设备 MAC 从 InputData1 批次检索;检查工位没导批次时退化为
+    // 只查非空(明文不在设备回报里,无从比对)。
+    readonly property string localCrc: {
+        const i = Session.batchIndexOfMac(dv("Mac"));
+        if (i < 0) return "";
+        const rec = Session.batchRecords[i];
+        return CloudClient.crc32Hex(rec[4] + rec[6]);
+    }
+    readonly property bool crcOk: dv("SecretCrc32").length > 0
+        && (localCrc.length === 0 || localCrc === dv("SecretCrc32"))
 
     readonly property bool allPass: tsAll && orderOk && infoOk && crcOk
 
-    // ---- 写检查标识(mock 模拟异步回报) ----
+    // ---- 写检查标识(真实指令闭环) ----
     property bool writing: false
     property bool done: false
     property string inspectTs: ""      // 协议要点2:首次生成,重试复用
-    property int nextRid: 1042
+    property int inspectReqId: -1
 
     function nowTs17() {
-        const d = new Date();
-        const p = (n, w) => String(n).padStart(w, "0");
-        return "" + d.getFullYear() + p(d.getMonth() + 1, 2) + p(d.getDate(), 2)
-             + p(d.getHours(), 2) + p(d.getMinutes(), 2) + p(d.getSeconds(), 2)
-             + p(d.getMilliseconds(), 3);
+        return Qt.formatDateTime(new Date(), "yyyyMMddHHmmsszzz");
     }
 
     function writeInspectStage() {
         if (inspectTs.length === 0)
-            inspectTs = nowTs17();     // 只生成一次
-        const rid = nextRid++;         // 重试换新 RequestId
-        flowLog.insert(0, { rid: rid, cmd: "PtestWriteStage", item: "检查",
-                            code: -1, detail: "等待设备回报…" });
+            inspectTs = nowTs17();     // 只生成一次(重试换 Timestamp=多次擦写+台账漂移)
         writing = true;
-        ackTimer.restart();            // mock:1.4s 后回 Code=0
+        inspectReqId = CloudClient.writeStage(4, inspectTs);   // RequestId 每次新
+        flowLog.insert(0, { rid: inspectReqId, cmd: "PtestWriteStage", item: "检查",
+                            code: -1, detail: "等待设备回报…" });
     }
 
-    Timer {
-        id: ackTimer
-        interval: 1400
-        onTriggered: {
-            flowLog.setProperty(0, "code", 0);
-            flowLog.setProperty(0, "detail", "ok");
+    Connections {
+        target: CloudClient
+        function onInfoUpdated(info) { root.devInfo = info; }
+        function onCommandFinished(requestId, command, item, code, detail) {
+            if (requestId !== root.inspectReqId) return;
+            root.inspectReqId = -1;
             root.writing = false;
-            root.done = true;
-            toast.show("检查标识写入成功  " + root.inspectTs, true);
+            flowLog.setProperty(0, "code", code);
+            flowLog.setProperty(0, "detail", code === 0 ? "ok"
+                : "Code=" + code + (detail.length > 0 ? " " + detail : ""));
+            if (code === 0) {
+                root.done = true;
+                toast.show("检查标识写入成功  " + root.inspectTs, true);
+                CloudClient.refreshInfo();    // 回读刷新 InspectTime
+            } else {
+                toast.show("检查标识写入失败  Code=" + code, false);
+            }
+        }
+        function onCommandTimeout(requestId) {
+            if (requestId !== root.inspectReqId) return;
+            root.inspectReqId = -1;
+            root.writing = false;
+            flowLog.setProperty(0, "code", -2);
+            flowLog.setProperty(0, "detail", "超时 — 可重试(复用同 Timestamp)");
+            toast.show("写检查标识超时，可重试", false);
+        }
+        function onCommandFailed(requestId, error) {
+            if (requestId !== root.inspectReqId) return;
+            root.inspectReqId = -1;
+            root.writing = false;
+            flowLog.setProperty(0, "code", -3);
+            flowLog.setProperty(0, "detail", error);
         }
     }
+
+    Component.onCompleted: CloudClient.refreshInfo()
 
     ListModel { id: flowLog }
 
@@ -138,11 +170,11 @@ Item {
 
                     // 1) 前三阶段时间戳(空 = 漏测/跳站,四时间戳字段的设计目的)
                     CheckRow { Layout.fillWidth: true; ok: root.tsFocus
-                        label: "调焦 FocusTime";   value: MockData.focusTime  || "缺失" }
+                        label: "调焦 FocusTime";   value: root.dv("FocusTime")  || "缺失" }
                     CheckRow { Layout.fillWidth: true; ok: root.tsSemi
-                        label: "准成品 SemiTime";  value: MockData.semiTime   || "缺失" }
+                        label: "准成品 SemiTime";  value: root.dv("SemiTime")   || "缺失" }
                     CheckRow { Layout.fillWidth: true; ok: root.tsFinish
-                        label: "成品 FinishTime";  value: MockData.finishTime || "缺失" }
+                        label: "成品 FinishTime";  value: root.dv("FinishTime") || "缺失" }
 
                     Rectangle { Layout.fillWidth: true; height: 1; color: Theme.borderSoft }
 
@@ -197,7 +229,8 @@ Item {
                     // SecretCrc32 一致性(设备回报 vs 本地按 §2.6 算得)
                     CheckRow { Layout.fillWidth: true; ok: root.crcOk
                         label: "密钥校验一致"
-                        value: "设备 " + MockData.secretCrc32 + "  ·  本地 " + MockData.localSecretCrc32 }
+                        value: "设备 " + (root.dv("SecretCrc32") || "—")
+                               + "  ·  本地 " + (root.localCrc || "未导批次(仅查非空)") }
 
                     // 引导:任一 ✗ 时告诉工人去哪补救
                     Text {
@@ -219,6 +252,7 @@ Item {
                         text: "重新读取"
                         glyph: Icons.reset
                         width: 132
+                        onClicked: CloudClient.refreshInfo()
                     }
                 }
             }

@@ -9,7 +9,54 @@ Item {
     id: root
     property bool archived: false
 
+    // ---- 云链路(2026-08-17 接入):读上报 + 真实清除/恢复默认 ----
+    property var devInfo: ({})
+    property int clearReqId: -1
+    property bool restorePending: false
+
+    function dv(key) {
+        return devInfo[key] !== undefined && devInfo[key] !== "" ? devInfo[key] : "—";
+    }
+
     ConfirmDialog { id: confirm }
+    Toast { id: toast }
+
+    ListModel { id: flowLog }
+
+    Connections {
+        target: CloudClient
+        function onInfoUpdated(info) { root.devInfo = info; }
+        function onCommandFinished(requestId, command, item, code, detail) {
+            if (requestId !== root.clearReqId) return;
+            root.clearReqId = -1;
+            flowLog.insert(0, { line: (code === 0 ? "✅ 清除完成"
+                                       : "❌ 清除失败 Code=" + code)
+                                      + (detail.length > 0 ? "  " + detail : "") });
+            toast.show(code === 0 ? "加密分区清除完成" : "清除失败  Code=" + code,
+                       code === 0);
+            if (code === 0) CloudClient.refreshInfo();   // 回读:身份字段应已清空
+        }
+        function onCommandTimeout(requestId) {
+            if (requestId !== root.clearReqId) return;
+            root.clearReqId = -1;
+            flowLog.insert(0, { line: "❌ 清除超时，可重试" });
+            toast.show("清除超时，可重试", false);
+        }
+        function onCommandFailed(requestId, error) {
+            if (requestId !== root.clearReqId) return;
+            root.clearReqId = -1;
+            flowLog.insert(0, { line: "❌ 通道错误: " + error });
+        }
+        function onGenericActionDone(actionId, ok, error) {
+            if (actionId !== "SetDefaultDevConfigs" || !root.restorePending) return;
+            root.restorePending = false;
+            flowLog.insert(0, { line: ok ? "✅ 恢复默认已受理"
+                                         : "❌ 恢复默认失败: " + error });
+            toast.show(ok ? "恢复默认配置已下发" : "恢复默认失败: " + error, ok);
+        }
+    }
+
+    Component.onCompleted: CloudClient.refreshInfo()
 
     RowLayout {
         anchors.fill: parent
@@ -37,10 +84,10 @@ Item {
                         columnSpacing: Theme.s6
                         rowSpacing: Theme.s3
 
-                        FieldRow { Layout.fillWidth: true; label: "SN";   value: MockData.sn }
-                        FieldRow { Layout.fillWidth: true; label: "IMEI"; value: MockData.imei }
-                        FieldRow { Layout.fillWidth: true; label: "UUID"; value: MockData.uuid }
-                        FieldRow { Layout.fillWidth: true; label: "MAC";  value: MockData.mac }
+                        FieldRow { Layout.fillWidth: true; label: "SN";   value: root.dv("Sn") }
+                        FieldRow { Layout.fillWidth: true; label: "IMEI"; value: root.dv("Imei") }
+                        FieldRow { Layout.fillWidth: true; label: "UUID"; value: root.dv("Uuid") }
+                        FieldRow { Layout.fillWidth: true; label: "MAC";  value: root.dv("Mac") }
                     }
 
                     Row {
@@ -51,7 +98,10 @@ Item {
                             kind: root.archived ? "normal" : "primary"
                             enabled: !root.archived
                             width: 168
-                            onClicked: root.archived = true
+                            onClicked: {
+                                CloudClient.refreshInfo();   // 存档前取最新回读值
+                                root.archived = true;
+                            }
                         }
                         Row {
                             visible: root.archived
@@ -64,7 +114,7 @@ Item {
                                 anchors.verticalCenter: parent.verticalCenter
                             }
                             Text {
-                                text: "已写入本地记录"
+                                text: "已读取（台账落库待接 SQLite）"
                                 color: Theme.pass
                                 font.family: TypeScale.family
                                 font.pointSize: TypeScale.body
@@ -110,8 +160,8 @@ Item {
 
                     RowLayout {
                         spacing: Theme.s4
-                        RadioButton { text: "仅标识（保留身份）"; checked: true }
-                        RadioButton { text: "全部" }
+                        RadioButton { id: scopeOnlyBtn; text: "仅标识（保留身份）"; checked: true }
+                        RadioButton { id: scopeAllBtn;  text: "全部" }
                     }
 
                     Row {
@@ -150,7 +200,11 @@ Item {
                         // 覆写设备全部持久化配置 → 确认
                         onClicked: confirm.ask("恢复默认配置？",
                             "设备全部持久化配置将覆写回出厂值（SetDefaultDevConfigs）。",
-                            function () { /* 真实实现:下发恢复默认 */ })
+                            function () {
+                                root.restorePending = true;
+                                flowLog.insert(0, { line: "→ 下发恢复默认配置" });
+                                CloudClient.invokeGenericAction("SetDefaultDevConfigs", {});
+                            })
                     }
                     AppButton {
                         text: "定时重启"; glyph: Icons.reboot; width: 146; enabled: false
@@ -180,51 +234,18 @@ Item {
                 anchors.fill: parent
                 clip: true
                 spacing: Theme.s1
-                model: MockData.log
+                model: flowLog
                 ScrollBar.vertical: ScrollBar {}
 
-                delegate: Item {
-                    required property var modelData
+                delegate: Text {
+                    required property string line
                     width: ListView.view.width
-                    height: 46
-
-                    Column {
-                        anchors.verticalCenter: parent.verticalCenter
-                        width: parent.width
-                        spacing: 1
-
-                        Row {
-                            spacing: Theme.s2
-                            Text {
-                                text: "#" + modelData.rid
-                                color: Theme.accent
-                                font.family: "Consolas"
-                                font.pointSize: TypeScale.caption
-                            }
-                            Text {
-                                text: modelData.cmd
-                                color: Theme.textPrimary
-                                font.family: TypeScale.family
-                                font.pointSize: TypeScale.caption
-                                font.weight: TypeScale.weightMedium
-                            }
-                            Text {
-                                text: modelData.item
-                                color: Theme.textDim
-                                font.family: TypeScale.family
-                                font.pointSize: TypeScale.caption
-                            }
-                        }
-                        Text {
-                            text: modelData.detail
-                            color: modelData.code === 0 ? Theme.pass
-                                   : (modelData.code < 0 ? Theme.running : Theme.fail)
-                            font.family: "Consolas"
-                            font.pointSize: TypeScale.caption
-                            elide: Text.ElideRight
-                            width: parent.width
-                        }
-                    }
+                    text: line
+                    color: line.indexOf("❌") >= 0 ? Theme.fail
+                           : line.indexOf("✅") >= 0 ? Theme.pass : Theme.textSecondary
+                    font.family: "Consolas"
+                    font.pointSize: TypeScale.caption
+                    wrapMode: Text.WrapAnywhere
                 }
             }
         }
@@ -236,9 +257,16 @@ Item {
         modal: true
         anchors.centerIn: parent
         standardButtons: Dialog.Cancel | Dialog.Ok
+        onAccepted: {
+            const all = scopeAllBtn.checked;
+            flowLog.insert(0, { line: "→ 清除加密分区  scope=" + (all ? "全部" : "仅标识") });
+            root.clearReqId = CloudClient.clearPartition(all ? 0 : 1);
+        }
 
         Text {
-            text: "此操作不可逆。设备 " + MockData.sn + " 的身份信息将被清除。"
+            text: "此操作不可逆。设备 " + root.dv("Sn") + " 将按「"
+                  + (scopeAllBtn.checked ? "全部（标识+身份+SUID）" : "仅标识")
+                  + "」范围清除。"
             color: Theme.textPrimary
             font.family: TypeScale.family
             font.pointSize: TypeScale.body

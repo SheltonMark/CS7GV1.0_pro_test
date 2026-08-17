@@ -75,6 +75,12 @@ int FactoryConfig::nestedInt(const char *section, const char *key, int fallback)
     return v.isDouble() ? v.toInt(fallback) : fallback;
 }
 
+QString FactoryConfig::topString(const char *key, const char *fallback) const
+{
+    const QJsonValue v = root_.value(QLatin1String(key));
+    return v.isString() ? v.toString() : QLatin1String(fallback);
+}
+
 int FactoryConfig::shutdownDelaySec() const { return topInt("shutdownDelaySec", 120); }
 int FactoryConfig::pollIntervalMs() const { return topInt("pollIntervalMs", 500); }
 int FactoryConfig::heartbeatTimeoutSec() const { return topInt("heartbeatTimeoutSec", 15); }
@@ -86,6 +92,13 @@ int FactoryConfig::sdTestSizeMb() const { return nestedInt("peripheral", "sdTest
 int FactoryConfig::whiteBrightness() const { return nestedInt("peripheral", "whiteBrightness", 100); }
 int FactoryConfig::ledBlinkMs() const { return nestedInt("peripheral", "ledBlinkMs", 500); }
 int FactoryConfig::speakerRepeat() const { return nestedInt("peripheral", "speakerRepeat", 1); }
+
+QString FactoryConfig::rtspUrlTemplate() const
+{
+    // 默认路径按常见 RTSP 服务猜测(:554/live/main);实际以设备端 RTSP 服务
+    // 为准 —— 不对就改 factory_config.json,不用改代码。
+    return topString("rtspUrlTemplate", "rtsp://%1:554/live/main");
+}
 
 QVariantList FactoryConfig::stationItems(const QString &productId, const QString &station,
                                          const QString &group,

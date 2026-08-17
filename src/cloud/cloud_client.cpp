@@ -11,6 +11,27 @@
 #include "mock_transport.hpp"
 #include "tencent_api_transport.hpp"
 
+namespace {
+
+// ProductTestInfo + DeviceInformation 合并成给 QML 的一张表。
+// 带网口产品(CS7G)调焦走 RTSP 直拉,URL 里的 IP 就取自 DeviceInformation 上报。
+QVariantMap InfoMapFromData(const QJsonObject &data)
+{
+    QJsonObject info = data.value(QStringLiteral("ProductTestInfo"))
+                           .toObject().value(QStringLiteral("Value")).toObject();
+    const QJsonObject device = data.value(QStringLiteral("DeviceInformation"))
+                                   .toObject().value(QStringLiteral("Value")).toObject();
+    if (!device.isEmpty()) {
+        info.insert(QStringLiteral("IpAddress"),
+                    device.value(QStringLiteral("IpAddress")));
+        info.insert(QStringLiteral("SystemVersion"),
+                    device.value(QStringLiteral("SystemVersion")));
+    }
+    return info.toVariantMap();
+}
+
+} // namespace
+
 CloudClient::CloudClient(QObject *parent)
     : QObject(parent)
 {
@@ -38,7 +59,7 @@ CloudClient::CloudClient(QObject *parent)
             const QJsonObject info =
                 reply.data.value(QStringLiteral("ProductTestInfo"))
                     .toObject().value(QStringLiteral("Value")).toObject();
-            if (!info.isEmpty()) emit infoUpdated(info.toVariantMap());
+            if (!info.isEmpty()) emit infoUpdated(InfoMapFromData(reply.data));
         });
     });
     idlePollTimer_.start();
@@ -170,7 +191,7 @@ void CloudClient::refreshInfo()
         log(QStringLiteral("← ProductTestInfo ") + compact(info));
         if (!result.isEmpty())
             log(QStringLiteral("← ProductTestResult ") + compact(result));
-        emit infoUpdated(info.toVariantMap());
+        emit infoUpdated(InfoMapFromData(reply.data));
     });
 }
 
@@ -239,7 +260,7 @@ void CloudClient::pollOnce()
             // ProductTestInfo 顺带带给界面（同一次轮询的免费搭车，不另发请求）
             const QJsonObject info = reply.data.value(QStringLiteral("ProductTestInfo"))
                                          .toObject().value(QStringLiteral("Value")).toObject();
-            if (!info.isEmpty()) emit infoUpdated(info.toVariantMap());
+            if (!info.isEmpty()) emit infoUpdated(InfoMapFromData(reply.data));
 
             const QJsonObject result = reply.data.value(QStringLiteral("ProductTestResult"))
                                            .toObject().value(QStringLiteral("Value")).toObject();

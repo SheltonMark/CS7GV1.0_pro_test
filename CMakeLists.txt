@@ -7,7 +7,7 @@ cmake_minimum_required(VERSION 3.21)
 # 否则批量误判无法追溯是哪个版本干的。此处是唯一来源。
 project(ptest_pc_client VERSION 0.1.6 LANGUAGES CXX)
 
-find_package(Qt6 6.7 REQUIRED COMPONENTS Quick QuickControls2 Network)
+find_package(Qt6 6.7 REQUIRED COMPONENTS Quick QuickControls2 Network Multimedia)
 
 qt_standard_project_setup(REQUIRES 6.7)
 
@@ -42,7 +42,8 @@ target_include_directories(app_ptest PRIVATE src src/cloud)
 target_link_libraries(app_ptest PRIVATE
     Qt6::Quick
     Qt6::QuickControls2
-    Qt6::Network)
+    Qt6::Network
+    Qt6::Multimedia)
 
 # ⚠️ 这两段 set_source_files_properties 必须写在 qt_add_qml_module **之前**。
 # 写在后面 CMake 不报错、构建也过，但属性静默失效 —— 单例不会被注册成单例，

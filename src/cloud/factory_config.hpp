@@ -34,6 +34,9 @@ class FactoryConfig : public QObject {
     Q_PROPERTY(int whiteBrightness READ whiteBrightness NOTIFY configChanged)
     Q_PROPERTY(int ledBlinkMs READ ledBlinkMs NOTIFY configChanged)
     Q_PROPERTY(int speakerRepeat READ speakerRepeat NOTIFY configChanged)
+    // —— 调焦 RTSP 直连(带网口产品,如 CS7GV1.0):%1 = 设备 IP。
+    //    RTSP 比上云快,但只有调焦工位能插网线(其余工位已套壳)。
+    Q_PROPERTY(QString rtspUrlTemplate READ rtspUrlTemplate NOTIFY configChanged)
 
 public:
     explicit FactoryConfig(QObject *parent = nullptr);
@@ -52,6 +55,7 @@ public:
     int whiteBrightness() const;
     int ledBlinkMs() const;
     int speakerRepeat() const;
+    QString rtspUrlTemplate() const;
 
     // 测试项勾选：productId × station("semi"/"finished") × group("auto"/"manual")。
     // auto 组的值 = 测试项位号(int)，manual 组 = 判定条目 key(string)。
@@ -75,6 +79,7 @@ private:
     QString filePath() const;
     int topInt(const char *key, int fallback) const;
     int nestedInt(const char *section, const char *key, int fallback) const;
+    QString topString(const char *key, const char *fallback) const;
 
     QJsonObject root_;
 };

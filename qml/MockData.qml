@@ -14,11 +14,14 @@ QtObject {
     // 每项 key 决定导航标题与页面路由;pending:true = 该工位页面尚未实现,
     // 进入后显示占位页(工位存在于工艺路线里,只是软件还没做,不该假装没有)。
     // 已实现的 key: focus/semi/finished/inspect/repair(+about 由 NavRail 恒定追加)
+    // 产品线定案(2026-08-17):两个产品,产测项一致。区别只在调焦拉流通道 ——
+    // CS7GV1.0 留有网口,调焦工位 RTSP 直拉(比上云快);其余工位已套壳无网口。
+    // CS6GV2.0 无网口,拉流与测试全走云。focusRtsp 即此开关。
     readonly property var profiles: [
-        { name: "CS7GV1.0", desc: "低功耗电池 IPC", productId: "5KHBENFCX2",
+        { name: "CS7GV1.0", desc: "低功耗电池 IPC · 带网口", productId: "5KHBENFCX2",
           // CS7G 实际外设 9 项(2026-08-15 确认):无红外灯(1)、无日夜切换(3)
           //   —— 全彩夜视产品用白光补光,既没有 IR 灯也没有 IR-CUT 滤光片。
-          enabled: true,  items: [0, 2, 4, 5, 6, 7, 8, 9, 10],
+          enabled: true, focusRtsp: true, items: [0, 2, 4, 5, 6, 7, 8, 9, 10],
           stations: [
               { key: "focus",    title: "调焦",   sub: "工位 1" },
               { key: "semi",     title: "准成品", sub: "工位 2" },
@@ -26,22 +29,16 @@ QtObject {
               { key: "inspect",  title: "检查",   sub: "工位 3" },
               { key: "repair",   title: "维修",   sub: "按需"   }
           ] },
-        // 示例:多产品工位差异。射频类产品在成品之前多三个工位,
-        // 且不做调焦(无镜头对焦环节)。用于验证"切产品换工位"的正确性。
-        { name: "CS8GV1.0", desc: "4G 摄像机(射频线)", productId: "8KH2RFDEMO",
-          // 示例值:该产品有红外灯与日夜切换(常规夜视),无云台
-          enabled: true,  items: [0, 1, 2, 3, 4, 5, 7, 8, 9, 10],
+        // ⚠️ productId 暂借 CS7G 的测试产品联调;拿到 CS6G 正式 ProductId 后替换
+        { name: "CS6GV2.0", desc: "低功耗电池 IPC · 无网口", productId: "5KHBENFCX2",
+          enabled: true, focusRtsp: false, items: [0, 2, 4, 5, 6, 7, 8, 9, 10],
           stations: [
-              { key: "flow",     title: "流量",   sub: "工位 1", pending: true },
-              { key: "rf",       title: "射频",   sub: "工位 2", pending: true },
-              { key: "coupling", title: "耦合",   sub: "工位 3", pending: true },
-              { key: "semi",     title: "准成品", sub: "工位 4" },
-              { key: "finished", title: "成品",   sub: "工位 4" },
-              { key: "inspect",  title: "检查",   sub: "工位 5" },
+              { key: "focus",    title: "调焦",   sub: "工位 1" },
+              { key: "semi",     title: "准成品", sub: "工位 2" },
+              { key: "finished", title: "成品",   sub: "工位 2" },
+              { key: "inspect",  title: "检查",   sub: "工位 3" },
               { key: "repair",   title: "维修",   sub: "按需"   }
-          ] },
-        { name: "CS6GV2.0", desc: "低功耗电池 IPC", productId: "",
-          enabled: false, items: [], stations: [] }
+          ] }
     ]
 
     // 设备上报的 ProductId(准入校验用,规则5)。
