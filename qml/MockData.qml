@@ -82,6 +82,35 @@ QtObject {
     // 复位按键(4,待 MCU)/云台(6,待电机)/咪头(8,待分贝采集) 天然就是差集。
     readonly property int supportedItems: 0x6A5
 
+    // ---- 人工判定条目全集(8 条) ----
+    // 人工项位号(指示灯0/白光2/复位4/云台6/喇叭7/咪头8):设备只回"指令已执行",
+    // 发光/出声/手感固件感知不到,现象只有人能确认。指示灯拆红/蓝/闪三条、
+    // 喇叭与咪头分列(坏件不同,合并判不良无法区分该换哪个器件)。
+    // op/p1/p2 = PtestPeripheralTest 参数(对齐设备端 peripheral_executors:
+    // 指示灯 P1 颜色 0红/1蓝/2双色、P2 闪烁周期;白光 P1 亮度;喇叭 P2 次数)。
+    // p1/p2 = -1 哨兵 → 工位页解析成工厂配置值(白光亮度/闪烁周期/播放次数)。
+    readonly property var manualBits: [0, 2, 4, 6, 7, 8]
+    // short = 同外设多条判定时的区分名(指示灯拆红/蓝/双色),配置面板与
+    // 测试页标题都用「group · short」;label 是给工人看的操作/判据说明。
+    readonly property var manualChecks: [
+        { key: "led_red",   item: 0, group: "指示灯",   short: "红灯",
+          label: "红灯常亮", glyph: Icons.light, op: 1, p1: 0, p2: 0 },
+        { key: "led_blue",  item: 0, group: "指示灯",   short: "蓝灯",
+          label: "蓝灯常亮", glyph: Icons.light, op: 1, p1: 1, p2: 0 },
+        { key: "led_blink", item: 0, group: "指示灯",   short: "双色",
+          label: "双色交替闪烁", glyph: Icons.light, op: 1, p1: 2, p2: -1 },
+        { key: "white",     item: 2, group: "白光灯",   short: "",
+          label: "满亮度发光", glyph: Icons.whiteLight, op: 1, p1: -1, p2: 0 },
+        { key: "speaker",   item: 7, group: "喇叭",     short: "",
+          label: "能从设备听到提示音", glyph: Icons.speaker, op: 4, p1: 0, p2: -1 },
+        { key: "mic",       item: 8, group: "咪头",     short: "",
+          label: "对着设备说话，能从电脑听到自己的声音", glyph: Icons.mic, op: 1, p1: 0, p2: 0 },
+        { key: "gimbal",    item: 6, group: "云台",     short: "",
+          label: "上下左右转动到位，无异响、无卡顿", glyph: Icons.gimbal, op: 4, p1: 0, p2: 0 },
+        { key: "reset_key", item: 4, group: "复位按键", short: "",
+          label: "按住复位键 3 秒，设备应上报按键事件", glyph: Icons.button, op: 0, p1: 0, p2: 0 }
+    ]
+
     // 四阶段完成时间戳(空串 = 未完成)
     readonly property string focusTime:   "20260815094512380"
     readonly property string semiTime:    "20260815101233907"

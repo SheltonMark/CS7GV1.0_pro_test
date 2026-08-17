@@ -31,6 +31,8 @@ class CloudClient : public QObject {
     Q_PROPERTY(QString productId READ productId WRITE setProductId NOTIFY deviceChanged)
     Q_PROPERTY(QString deviceName READ deviceName WRITE setDeviceName NOTIFY deviceChanged)
     Q_PROPERTY(bool busy READ busy NOTIFY busyChanged)
+    // 在线判定 = 最近一次读设备上报是否成功（顶栏指示用；Mock 恒为在线）
+    Q_PROPERTY(bool online READ online NOTIFY onlineChanged)
 
 public:
     explicit CloudClient(QObject *parent = nullptr);
@@ -41,6 +43,7 @@ public:
     QString deviceName() const { return deviceName_; }
     void setDeviceName(const QString &value);
     bool busy() const { return inFlight_; }
+    bool online() const { return online_; }
 
     // —— 5 条产测指令。返回本次 RequestId，结果经 commandFinished /
     //    commandTimeout / commandFailed 信号回来（按 RequestId 对应）。
@@ -58,10 +61,10 @@ public:
     Q_INVOKABLE int shutdownDevice(int delaySec);
 
     // 通用 action（非产测指令，无 RequestId、不回 ProductTestResult，
-    // 如 SetDefaultDevConfigs 恢复出厂设置）。不走指令队列，云端受理即算
-    // 完成（打通期口径；后续可让固件在产测态补回执再收紧）。
+    // 如 SetDefaultDevConfigs 恢复出厂、SetDeviceTime 时间同步）。不走指令
+    // 队列，云端受理即算完成（打通期口径；后续可让固件在产测态补回执再收紧）。
     // 结果经 genericActionDone(actionId, ok, error) 回来。
-    Q_INVOKABLE void invokeGenericAction(const QString &actionId);
+    Q_INVOKABLE void invokeGenericAction(const QString &actionId, const QVariantMap &params);
 
     // 工具：密钥校验比对用 CRC32（8 位大写 hex）；b64url 编码（无填充）
     Q_INVOKABLE QString crc32Hex(const QString &text) const;
@@ -77,6 +80,7 @@ signals:
     void modeChanged();
     void deviceChanged();
     void busyChanged();
+    void onlineChanged();
     // 调试页日志（已带时间戳前缀）
     void logLine(const QString &line);
     void commandFinished(int requestId, int command, int item, int code,
@@ -98,6 +102,8 @@ private:
     void pump();
     void pollOnce();
     void loadConfig();
+    void updateOnline(const CloudReply &reply);
+    void setOnline(bool value);
     void log(const QString &line);
     static QString compact(const QJsonObject &obj);
 
@@ -108,7 +114,9 @@ private:
     QList<PendingCommand> queue_;
     PendingCommand current_;
     bool inFlight_ {false};
+    bool online_ {false};
     qint64 deadlineMs_ {0};
     QTimer pollTimer_;
+    QTimer idlePollTimer_;
     int nextRequestId_ {1};
 };

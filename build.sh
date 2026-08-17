@@ -79,6 +79,9 @@ if [ -f "$HERE/cloud_config.json" ]; then
     cp "$HERE/cloud_config.json" "$DIST_WORK/"
 fi
 
+# 工厂配置（工艺参数+测试项勾选默认值）随包发，产线可直接改
+cp "$HERE/resources/factory_config.json" "$DIST_WORK/"
+
 # 注意：opengl32sw.dll（约 20MB）是软件 OpenGL 兜底，故意保留。
 # 产线电脑常是低配机/显卡驱动不全/远程桌面登录，缺它会白屏或崩，
 # 省这 20MB 不值得拿停线风险换。

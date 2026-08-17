@@ -75,7 +75,7 @@ qt_add_qml_module(app_ptest
         qml/AppButton.qml
         qml/Card.qml
         qml/ConfirmDialog.qml
-        qml/ManualVerifyPanel.qml
+        qml/SequentialTestPanel.qml
         qml/FieldRow.qml
         qml/TestItemRow.qml
         qml/ResultBanner.qml
@@ -115,6 +115,8 @@ qt_add_qml_module(app_ptest
         src/cloud/tencent_api_transport.cpp
         src/cloud/cloud_client.hpp
         src/cloud/cloud_client.cpp
+        src/cloud/factory_config.hpp
+        src/cloud/factory_config.cpp
     RESOURCES
         # logo 与 QML 同目录，QML 里直接写 "logo.png" 即可
         resources/logo.png

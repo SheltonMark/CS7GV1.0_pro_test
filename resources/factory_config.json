@@ -1,0 +1,18 @@
+{
+  "_说明": "工厂配置。随包发在 ProductTestTool.exe 同目录，产线可直接改；缺键用软件内置默认值。stationItems（各产品各工位的测试项勾选）由管理员在软件内配置后自动写入本文件。",
+  "shutdownDelaySec": 120,
+  "pollIntervalMs": 500,
+  "heartbeatTimeoutSec": 15,
+  "timeouts": {
+    "normalMs": 10000,
+    "flashMs": 15000,
+    "peripheralMs": 15000,
+    "cellularMs": 40000
+  },
+  "peripheral": {
+    "sdTestSizeMb": 1,
+    "whiteBrightness": 100,
+    "ledBlinkMs": 500,
+    "speakerRepeat": 1
+  }
+}

@@ -7,16 +7,9 @@
 #include <QTime>
 
 #include "crc32.hpp"
+#include "factory_config.hpp"
 #include "mock_transport.hpp"
 #include "tencent_api_transport.hpp"
-
-namespace {
-
-// 轮询节奏：产线单工位单设备 + 指令串行，500ms 足够跟上节拍；
-// 更快只会白烧云 API 配额（真连时每 poll 一次就是一次计费调用）。
-constexpr int kPollIntervalMs = 500;
-
-} // namespace
 
 CloudClient::CloudClient(QObject *parent)
     : QObject(parent)
@@ -26,8 +19,29 @@ CloudClient::CloudClient(QObject *parent)
     nextRequestId_ =
         static_cast<int>((QDateTime::currentSecsSinceEpoch() % 86400) * 10000 + 1);
 
-    pollTimer_.setInterval(kPollIntervalMs);
+    // 轮询节奏走工厂配置（默认 500ms）：产线单工位单设备 + 指令串行足够跟上
+    // 节拍；更快只会白烧云 API 配额（真连时每 poll 一次就是一次计费调用）。
+    pollTimer_.setInterval(FactoryConfig::instance()->pollIntervalMs());
     connect(&pollTimer_, &QTimer::timeout, this, &CloudClient::pollOnce);
+
+    // 空闲心跳读：指令不在途时定期轻读上报，驱动"在线=心跳新鲜"的判定并给
+    // 设备信息保鲜（指令在途时 pollTimer 本来就在读，不重复）。周期取心跳
+    // 超时的一半——保证离线能在一个超时窗口内被发现。
+    idlePollTimer_.setInterval(
+        qMax(3000, FactoryConfig::instance()->heartbeatTimeoutSec() * 1000 / 2));
+    connect(&idlePollTimer_, &QTimer::timeout, this, [this]() {
+        if (inFlight_ || !transport_) return;
+        transport_->readDeviceData(productId_, deviceName_,
+                                   [this](const CloudReply &reply) {
+            updateOnline(reply);
+            if (!reply.ok) return;
+            const QJsonObject info =
+                reply.data.value(QStringLiteral("ProductTestInfo"))
+                    .toObject().value(QStringLiteral("Value")).toObject();
+            if (!info.isEmpty()) emit infoUpdated(info.toVariantMap());
+        });
+    });
+    idlePollTimer_.start();
 
     loadConfig();
 }
@@ -53,23 +67,26 @@ void CloudClient::setDeviceName(const QString &value)
 
 int CloudClient::writeStage(int stage, const QString &timestamp17)
 {
+    // 写阶段落 flash（整块擦写百毫秒级 + 设备单槽 worker），按 flash 类超时
     return enqueue(QStringLiteral("PtestWriteStage"),
                    QJsonObject{{QStringLiteral("Stage"), stage},
                                {QStringLiteral("Timestamp"), timestamp17}},
-                   10000);
+                   FactoryConfig::instance()->timeoutFlashMs());
 }
 
 int CloudClient::clearPartition(int scope)
 {
     return enqueue(QStringLiteral("PtestClearPartition"),
-                   QJsonObject{{QStringLiteral("Scope"), scope}}, 15000);
+                   QJsonObject{{QStringLiteral("Scope"), scope}},
+                   FactoryConfig::instance()->timeoutFlashMs());
 }
 
 int CloudClient::peripheralTest(int item, int operation, int param1, int param2,
                                 const QString &text)
 {
-    // 4G 项（Item=9）内含 SIM 逐槽检测，设备端最长 30s 网络等待——超时放宽
-    const int timeoutMs = (item == 9) ? 40000 : 15000;
+    // 4G 项（Item=9）内含 SIM 逐槽检测，设备端最长 30s 网络等待——超时单列
+    const int timeoutMs = (item == 9) ? FactoryConfig::instance()->timeoutCellularMs()
+                                      : FactoryConfig::instance()->timeoutPeripheralMs();
     return enqueue(QStringLiteral("PtestPeripheralTest"),
                    QJsonObject{{QStringLiteral("Item"), item},
                                {QStringLiteral("Operation"), operation},
@@ -92,20 +109,24 @@ int CloudClient::writeIdentity(const QVariantMap &fields)
             value = b64Url(value);
         params.insert(QLatin1String(key), value);
     }
-    return enqueue(QStringLiteral("PtestWriteIdentity"), params, 15000);
+    return enqueue(QStringLiteral("PtestWriteIdentity"), params,
+                   FactoryConfig::instance()->timeoutFlashMs());
 }
 
 int CloudClient::shutdownDevice(int delaySec)
 {
     return enqueue(QStringLiteral("PtestShutdown"),
-                   QJsonObject{{QStringLiteral("DelaySec"), delaySec}}, 10000);
+                   QJsonObject{{QStringLiteral("DelaySec"), delaySec}},
+                   FactoryConfig::instance()->timeoutNormalMs());
 }
 
-void CloudClient::invokeGenericAction(const QString &actionId)
+void CloudClient::invokeGenericAction(const QString &actionId, const QVariantMap &params)
 {
     if (!transport_) return;
-    log(QStringLiteral("→ 下发 %1（通用 action，受理即完成）").arg(actionId));
-    transport_->invokeAction(productId_, deviceName_, actionId, QJsonObject(),
+    const QJsonObject json = QJsonObject::fromVariantMap(params);
+    log(QStringLiteral("→ 下发 %1 %2（通用 action，受理即完成）")
+            .arg(actionId, compact(json)));
+    transport_->invokeAction(productId_, deviceName_, actionId, json,
                              [this, actionId](const CloudReply &reply) {
         if (reply.ok)
             log(QStringLiteral("✓ %1 云端已受理").arg(actionId));
@@ -137,6 +158,7 @@ void CloudClient::refreshInfo()
     if (!transport_) return;
     log(QStringLiteral("→ 读取设备上报 (DescribeDeviceData)"));
     transport_->readDeviceData(productId_, deviceName_, [this](const CloudReply &reply) {
+        updateOnline(reply);
         if (!reply.ok) {
             log(QStringLiteral("✗ 读上报失败: ") + reply.error);
             return;
@@ -210,6 +232,7 @@ void CloudClient::pollOnce()
         return;
     }
     transport_->readDeviceData(productId_, deviceName_, [this](const CloudReply &reply) {
+        updateOnline(reply);
         if (!inFlight_) return;
 
         if (reply.ok) {
@@ -285,6 +308,35 @@ void CloudClient::loadConfig()
     }
     emit modeChanged();
     emit deviceChanged();
+}
+
+// 在线判定（2026-08-17 需求）：腾讯云自身的在线状态有延迟，以设备心跳包为准
+// —— 设备产测态周期上报 PtestHeartbeat，其 LastUpdate 距今在超时窗口内 = 在线。
+// 固件尚未加心跳（或旧物模型）时退化为"本次读取成功即在线"。
+void CloudClient::updateOnline(const CloudReply &reply)
+{
+    if (!reply.ok) {
+        setOnline(false);
+        return;
+    }
+    const QJsonObject heartbeat =
+        reply.data.value(QStringLiteral("PtestHeartbeat")).toObject();
+    if (heartbeat.isEmpty()) {
+        setOnline(true);
+        return;
+    }
+    const qint64 lastMs =
+        static_cast<qint64>(heartbeat.value(QStringLiteral("LastUpdate")).toDouble());
+    const qint64 windowMs =
+        qint64(FactoryConfig::instance()->heartbeatTimeoutSec()) * 1000;
+    setOnline(QDateTime::currentMSecsSinceEpoch() - lastMs <= windowMs);
+}
+
+void CloudClient::setOnline(bool value)
+{
+    if (online_ == value) return;
+    online_ = value;
+    emit onlineChanged();
 }
 
 void CloudClient::log(const QString &line)

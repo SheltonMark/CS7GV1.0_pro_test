@@ -64,6 +64,10 @@ void MockTransport::readDeviceData(const QString & /*productId*/, const QString 
             {QStringLiteral("ProductTestInfo"),
              QJsonObject{{QStringLiteral("Value"), info_},
                          {QStringLiteral("LastUpdate"), nowMs}}},
+            // 心跳:假设备永远新鲜(真机=固件周期上报,LastUpdate 由云端盖章)
+            {QStringLiteral("PtestHeartbeat"),
+             QJsonObject{{QStringLiteral("Value"), 1},
+                         {QStringLiteral("LastUpdate"), nowMs}}},
         };
         if (hasResult_) {
             data.insert(QStringLiteral("ProductTestResult"),
@@ -146,9 +150,10 @@ void MockTransport::execute(const QString &actionId, const QJsonObject &p)
         setResult(requestId, 5, -1, 0,
                   QStringLiteral("shutdown in %1s").arg(delay));
 
-    } else if (actionId == QLatin1String("SetDefaultDevConfigs")) {
-        // 通用恢复出厂：非产测指令，不写 ProductTestResult（与真机行为一致，
-        // PC 按"云端受理即完成"处理）。也不动加密分区字段。
+    } else if (actionId == QLatin1String("SetDefaultDevConfigs")
+               || actionId == QLatin1String("SetDeviceTime")) {
+        // 通用 action（恢复出厂/时间同步）：非产测指令，不写 ProductTestResult
+        //（与真机行为一致，PC 按"云端受理即完成"处理）。也不动加密分区字段。
         return;
 
     } else {

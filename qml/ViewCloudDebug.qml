@@ -233,7 +233,7 @@ Item {
                             glyph: Icons.reset
                             implicitHeight: Theme.hit - 10
                             // 通用 action(恢复出厂),受理即完成,结果看流水
-                            onClicked: CloudClient.invokeGenericAction("SetDefaultDevConfigs")
+                            onClicked: CloudClient.invokeGenericAction("SetDefaultDevConfigs", {})
                         }
                         AppButton {
                             text: "关机120s"

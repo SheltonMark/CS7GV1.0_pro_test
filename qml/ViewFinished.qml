@@ -3,87 +3,87 @@ import ptest
 import QtQuick.Controls
 import QtQuick.Layouts
 
-// 成品/准成品工位 —— 信息最密的一屏,也是设计上最吃力的一屏。
-// 布局:左=流程步骤 / 中=测试项主表 / 右=结果爆点+设备信息
+// 成品/准成品工位。
+// 中栏 = 逐项测试(键盘流,SequentialTestPanel):队列 = 管理员勾选 ∩ 产品 profile
+// ∩ 设备能力;测完出汇总页,回车确认结果后才"跳出"写标识条(成品另有 MAC 输入)。
+// 写标识后自动链(全程等待层转圈):
+//   准成品: 写标识(回读核对) → 配置清除 → 定时关机
+//   成品:   写产测信息+成品标识 → 采集信息入库(IMEI+逐字段校验+批次回填)
+//           → 配置清除 → 定时关机
 Item {
     id: root
     property bool semi: false
 
     ConfirmDialog { id: confirm }
 
-    // 实际下发行集(规则4) = profile 固定项 ∩ 设备 SupportedItems:
-    // - profile 要求而设备未上报 → state 覆写为 5(缺能力,标红,计不通过),不静默跳过
-    // - 设备上报而 profile 不含 → 不出现在列表(不下发)
-    // SupportedItems 用设备真实上报值(devInfo),建连前退回 MockData 演示值。
-    // 各行状态来自本工位真实指令结果(itemStates),不再用 MockData 的假状态。
-    readonly property var rows: {
-        if (!Session.profile) return [];
-        const dev = supportedItemsLive;
-        return Session.profile.items.map(function (bit) {
-            const base = MockData.itemByBit(bit);
-            if (!(dev & (1 << bit)))
-                return Object.assign({}, base, { state: 5, reading: "" });
-            const st = itemStates[bit];
-            return Object.assign({}, base, { state: st ? st.state : 0,
-                                             reading: st ? st.reading : "" });
-        });
-    }
-
-    // 自动项(设备回读数,PC 比阈值可自动判) vs 人工项(设备只回 ok,
-    // 真实结论在工人眼睛耳朵里)。分开的理由见 ManualVerifyPanel 头注释。
-    // 人工判定项:设备只回 ok、发光/出声固件感知不到的项。
-    // CS7G 无红外灯(全彩夜视用白光补光),故只有三项。
-    // 指示灯(0)/白光(2)/复位键(4)/云台(6)/喇叭(7)/咪头(8) 共 6 位、8 条判定
-    //(指示灯拆红/蓝/闪三条)。判据都是"现象只有人能确认":
-    // 分贝值证明不了"人听得清";云台电流正常但虚位转不到位固件感知不到;
-    // 复位键得人去按,按键手感与回弹只能人手判断。
-    readonly property var manualBits: [0, 2, 4, 6, 7, 8]
-    readonly property var autoRows: rows.filter(r => manualBits.indexOf(r.item) < 0)
-    readonly property var manualRows: rows.filter(r => manualBits.indexOf(r.item) >= 0)
-
-    // 只统计自动项 —— 卡片标题写的就是"自动测试项",下面渲染的也是 autoRows。
-    // 若按全部 rows 统计,头部会显示 9 项的计数而列表只有 6 行,工人对不上账。
-    // 人工项的结论归 ManualVerifyPanel(它自己有 settledCount/anyFail),
-    // 写标识按钮同时看两边,总判定不会漏项。
-    readonly property var counts: {
-        const c = { pass: 0, fail: 0, run: 0, wait: 0, miss: 0 };
-        autoRows.forEach(function (r) {
-            if (r.state === 2) c.pass++;
-            else if (r.state === 3) c.fail++;
-            else if (r.state === 1) c.run++;
-            else if (r.state === 5) c.miss++;
-            else c.wait++;
-        });
-        return c;
-    }
-
-    // ---- 云链路(2026-08-17 接入):自动项与写标识走真实指令闭环 ----
-    // itemStates: item → {state, reading};reqToItem: RequestId → item(结果关联)
-    property var itemStates: ({})
-    property var reqToItem: ({})
-    property bool autoStarted: false
-    property bool autoRunning: false
-    property int writeReqId: -1
-    // 刚下发的阶段时间戳(等回读确认);确认后落 writtenStamp 并 toast ——
-    // 工人看到的"成功"是从设备里读回来的值,不是一句空话。
-    property string sentStamp: ""
-    property string writtenStamp: ""
-    // 设备最新上报(ProductTestInfo):右栏设备信息与写标识回读确认都取这里
+    // ---- 设备上报(ProductTestInfo)与能力 ----
     property var devInfo: ({})
     readonly property bool infoConnected: devInfo.SupportedItems !== undefined
     readonly property int supportedItemsLive: infoConnected ? devInfo.SupportedItems
                                                             : MockData.supportedItems
 
-    // ---- 写标识后的自动链(需求 2026-08-17):准成品=配置清除→定时关机;
-    //      成品=采集信息入库→配置清除→定时关机。链执行期间全页等待态转圈。 ----
+    // ---- 测试队列(需求① 2026-08-17):管理员勾选 ∩ 产品 ∩ 设备能力标记 ----
+    readonly property string stationKey: semi ? "semi" : "finished"
+
+    readonly property var checkedAutoItems: {
+        if (!Session.profile) return [];
+        const all = Session.profile.items.filter(b => MockData.manualBits.indexOf(b) < 0);
+        const sel = FactoryConfig.stationItems(Session.profile.productId, stationKey,
+                                               "auto", all);
+        return all.filter(b => sel.indexOf(b) >= 0);
+    }
+
+    readonly property var checkedManualChecks: {
+        const allKeys = MockData.manualChecks.map(c => c.key);
+        const sel = Session.profile
+                    ? FactoryConfig.stationItems(Session.profile.productId, stationKey,
+                                                 "manual", allKeys)
+                    : allKeys;
+        return MockData.manualChecks.filter(c => sel.indexOf(c.key) >= 0);
+    }
+
+    // 先自动后人工;p1/p2 的 -1 哨兵在此解析成工厂配置值
+    readonly property var testQueue: {
+        var q = [];
+        checkedAutoItems.forEach(function (bit) {
+            const base = MockData.itemByBit(bit);
+            var op = 0, p1 = 0;
+            if (bit === 10) { op = 4; p1 = FactoryConfig.sdTestSizeMb; }  // SD 写读校验
+            q.push({ kind: "auto", item: bit,
+                     name: base ? base.name : ("bit" + bit),
+                     sub: base ? base.detail : "",
+                     op: op, p1: p1, p2: 0,
+                     miss: (supportedItemsLive & (1 << bit)) === 0 });
+        });
+        checkedManualChecks.forEach(function (c) {
+            q.push({ kind: "manual", item: c.item, key: c.key,
+                     name: c.group + (c.short.length > 0 ? " · " + c.short : ""),
+                     sub: c.label,
+                     op: c.op,
+                     p1: c.p1 === -1 ? FactoryConfig.whiteBrightness : c.p1,
+                     p2: c.p2 === -1 ? (c.key === "led_blink" ? FactoryConfig.ledBlinkMs
+                                                              : FactoryConfig.speakerRepeat)
+                                     : c.p2,
+                     miss: (supportedItemsLive & (1 << c.item)) === 0 });
+        });
+        return q;
+    }
+
+    // 结果确认门(需求补充):汇总页回车确认后才算测试完成
+    readonly property bool testsClean: seqPanel.confirmed && !seqPanel.anyBad
+
+    // ---- 写标识后的自动链 ----
     // 阶段: ""空闲 | write 写标识(成品含先写产测信息) | collect 采集入库
     //     | clear 配置清除 | shutdown 定时关机 | done 完成 | failed 失败
     property string chainPhase: ""
     property string chainError: ""
     property int identityReqId: -1
+    property int writeReqId: -1
     property int imeiReqId: -1
     property int shutdownReqId: -1
     property int recIndex: -1          // 成品:本次使用的批次行
+    property string sentStamp: ""      // 刚下发的时间戳(等回读确认)
+    property string writtenStamp: ""   // 回读确认后的设备侧真值
     readonly property bool chainBusy: chainPhase === "write" || chainPhase === "collect"
                                       || chainPhase === "clear" || chainPhase === "shutdown"
 
@@ -103,7 +103,7 @@ Item {
         macField.text = Session.nextUnusedMac();
     }
 
-    // 批次导入后带出第一条未用;入库成功后自动跳下一条(2026-08-17 用户补充)
+    // 批次导入后带出第一条未用;入库成功后自动跳下一条
     Connections {
         target: Session
         function onBatchRecordsChanged() { root.refillMac(); }
@@ -116,12 +116,6 @@ Item {
         }
     }
 
-    // 写标识开放条件:自动项全绿 + 人工判定全过(外设逐项验证成功后才允许写入)
-    readonly property bool canWrite: autoStarted && !autoRunning
-        && counts.fail === 0 && counts.miss === 0
-        && counts.wait === 0 && counts.run === 0
-        && manualPanel.allDone && !manualPanel.anyFail
-
     // 设备信息取值:未上报显示 "—" 而不是空白(空白像坏了)
     function dv(key) {
         return devInfo[key] !== undefined && devInfo[key] !== "" ? devInfo[key] : "—";
@@ -131,34 +125,16 @@ Item {
         return Qt.formatDateTime(new Date(), "yyyyMMddHHmmsszzz");
     }
 
-    // 自动项参数(语义=设备端 peripheral_executors 注释):
-    // 电池/4G 查询(4G P1=0 当前槽不切卡);SD 用 Operation=4 写读校验,P1=大小MB。
-    function autoParams(item) {
-        if (item === 10) return { op: 4, p1: 1, p2: 0 };
-        return { op: 0, p1: 0, p2: 0 };
+    // 工位开头同步设备时间:设备端"时间戳留空用本地时间"依赖它;台账以 PC 钟为准
+    function syncDeviceTime() {
+        const d = new Date();
+        CloudClient.invokeGenericAction("SetDeviceTime", {
+            Year: d.getFullYear(), Month: d.getMonth() + 1, Day: d.getDate(),
+            Hour: d.getHours(), Minute: d.getMinutes(), Second: d.getSeconds() });
     }
 
-    function startAutoTest() {
-        autoStarted = true;
-        var states = {};
-        var reqs = {};
-        autoRows.forEach(function (r) {
-            if (r.state === 5) return;            // 缺能力项不下发
-            states[r.item] = { state: 1, reading: "" };
-            const a = autoParams(r.item);
-            const id = CloudClient.peripheralTest(r.item, a.op, a.p1, a.p2, "");
-            reqs[id] = r.item;
-        });
-        itemStates = states;
-        reqToItem = reqs;
-        autoRunning = Object.keys(reqs).length > 0;
-        if (!autoRunning) manualPanel.ready = true;   // 全缺能力:直接开放人工
-    }
-
-    // 写标识:下发 → 设备写入(flash/联调期为文件) → 回 ProductTestResult →
-    // PC 再回读 ProductTestInfo 核对时间戳 → toast。写入的证据是回读值。
-    // 成品:先写产测信息(批次记录),后写成品标识 —— finishTestFlag 非空设备即按
-    // "成品"从分区加载身份,顺序反了会产出"空身份的成品"。
+    // 写标识。成品:先写产测信息(批次记录),后写成品标识 —— finishTestFlag 非空
+    // 设备即按"成品"从分区加载身份,顺序反了会产出"空身份的成品"。
     function doWriteStage() {
         chainError = "";
         chainPhase = "write";
@@ -184,10 +160,10 @@ Item {
 
     function startClear() {
         chainPhase = "clear";
-        CloudClient.invokeGenericAction("SetDefaultDevConfigs");
+        CloudClient.invokeGenericAction("SetDefaultDevConfigs", {});
     }
 
-    // 成品采集入库校验:设备回传的产测信息 vs InputData1 源记录逐字段比对。
+    // 成品采集入库校验:设备回传产测信息 vs InputData1 源记录逐字段比对。
     // 密钥不比明文,比 CRC32(评审 §2.6 口径)。返回不匹配字段名列表。
     function verifyRecord(rec, info) {
         var bad = [];
@@ -205,27 +181,6 @@ Item {
     }
 
     function handleResult(requestId, code, detail) {
-        if (reqToItem[requestId] !== undefined) {       // —— 外设自动项结果
-            const item = reqToItem[requestId];
-            var states = {};
-            for (var k in itemStates) states[k] = itemStates[k];
-            if (code === 0)
-                states[item] = { state: 2, reading: detail.length > 0 ? detail : "ok" };
-            else if (code === 4)
-                states[item] = { state: 5, reading: "设备回:不支持" };
-            else
-                states[item] = { state: 3, reading: detail };
-            itemStates = states;
-            var reqs = {};
-            for (var r in reqToItem)
-                if (parseInt(r) !== requestId) reqs[r] = reqToItem[r];
-            reqToItem = reqs;
-            if (Object.keys(reqs).length === 0) {
-                autoRunning = false;
-                manualPanel.ready = true;               // 自动项收尾 → 开放人工判定
-            }
-            return;
-        }
         if (requestId === identityReqId) {              // —— 成品:写产测信息结果
             identityReqId = -1;
             if (code === 0) {
@@ -251,9 +206,8 @@ Item {
         if (requestId === imeiReqId) {                  // —— 成品:4G/IMEI 指令结果
             imeiReqId = -1;
             if (code === 0) {
-                CloudClient.refreshInfo();              // 取 Imei + 全量校验,见 onInfoUpdated
+                CloudClient.refreshInfo();              // 取 Imei + 全量校验
             } else {
-                // 口径:校验不过 IMEI 留空白、不置入库标记,链中止转维修
                 chainFail("获取 IMEI 失败(4G)  Code=" + code
                           + (detail.length > 0 ? "  " + detail : ""));
             }
@@ -263,8 +217,8 @@ Item {
             shutdownReqId = -1;
             if (code === 0) {
                 chainPhase = "done";
-                toast.show((semi ? "准成品" : "成品")
-                           + "流程完成:设备将在 120 秒后关机", true);
+                toast.show((semi ? "准成品" : "成品") + "流程完成：设备将在 "
+                           + FactoryConfig.shutdownDelaySec + " 秒后关机", true);
             } else {
                 chainFail("定时关机下发失败  Code=" + code
                           + (detail.length > 0 ? "  " + detail : ""));
@@ -327,41 +281,40 @@ Item {
                 return;
             }
             root.chainPhase = "shutdown";
-            root.shutdownReqId = CloudClient.shutdownDevice(120);
+            root.shutdownReqId = CloudClient.shutdownDevice(FactoryConfig.shutdownDelaySec);
         }
     }
 
     Toast { id: toast }
 
-    // 进工位即读一次设备上报:步骤条"连接设备"与右栏设备信息都靠它;
-    // 成品工位同时带出第一条未入库 MAC
     Component.onCompleted: {
-        CloudClient.refreshInfo();
+        CloudClient.refreshInfo();   // 步骤条"连接设备"与右栏设备信息
+        syncDeviceTime();            // 工位开头同步时间(设备端依赖)
         refillMac();
+        seqPanel.forceActiveFocus();
     }
 
-    // ---- 工位步骤(动态跟随真实进度;准成品工位写标识步文案=写准成品标识) ----
+    // ---- 工位步骤(动态跟随;准成品写标识步文案=写准成品标识) ----
     readonly property var steps: {
         const rank = ["write", "collect", "clear", "shutdown", "done"].indexOf(chainPhase);
         var out = [
             { name: "连接设备 · 读信息",
               state: infoConnected ? 2 : 1 },
-            { name: "外设自动项",
-              state: autoRunning ? 1
-                     : (autoStarted && counts.fail === 0 && counts.miss === 0
-                        && counts.wait === 0 ? 2 : (autoStarted ? 1 : 0)) },
-            { name: "人工判定",
-              state: manualPanel.allDone ? 2 : (manualPanel.ready ? 1 : 0) },
+            { name: "逐项测试 " + seqPanel.settled + "/" + seqPanel.total,
+              state: seqPanel.confirmed ? (seqPanel.anyBad ? 1 : 2)
+                     : (seqPanel.settled > 0 || seqPanel.phase === "running"
+                        || seqPanel.phase === "summary" ? 1 : 0) },
             { name: semi ? "写准成品标识" : "写成品标识",
               state: writtenStamp.length > 0 ? 2
-                     : (chainPhase === "write" || canWrite ? 1 : 0) }
+                     : (chainPhase === "write"
+                        || (testsClean && (semi || macError.length === 0)) ? 1 : 0) }
         ];
         if (!semi)
             out.push({ name: "采集信息入库",
                        state: rank > 1 ? 2 : (chainPhase === "collect" ? 1 : 0) });
         out.push({ name: "配置清除",
                    state: rank > 2 ? 2 : (chainPhase === "clear" ? 1 : 0) });
-        out.push({ name: "定时关机 120s",
+        out.push({ name: "定时关机 " + FactoryConfig.shutdownDelaySec + "s",
                    state: chainPhase === "done" ? 2
                           : (chainPhase === "shutdown" ? 1 : 0) });
         return out;
@@ -385,144 +338,23 @@ Item {
             }
         }
 
-        // ---- 中:自动测试项 + 人工判定 + 写标识 ----
-        // 窗口非全屏时(默认 1440x900,产线机器还可能更小)内容高度会超出可视区,
-        // 写标识按钮被挤到屏幕外 —— 工人以为"没有这个按钮"。
-        // 解法:测试项与判定面板放进 ScrollView 可滚,写标识条钉在底部常驻。
-        // 主操作永不随滚动消失,这是产线工具的硬要求。
+        // ---- 中:逐项测试 + (确认后)写标识条 ----
         ColumnLayout {
             Layout.fillWidth: true
             Layout.fillHeight: true
             spacing: Theme.s4
 
-        ScrollView {
-            Layout.fillWidth: true
-            Layout.fillHeight: true
-            contentWidth: availableWidth        // 只纵向滚
-            clip: true
-            ScrollBar.vertical.policy: ScrollBar.AsNeeded
-
-            ColumnLayout {
-                width: parent.width
-                spacing: Theme.s4
-
-        Card {
-            title: "自动测试项  ·  设备回读数，PC 判阈值"
-            titleIcon: Icons.navFinished
-            fitContent: true
-            Layout.fillWidth: true
-
-            // fitContent 卡片内层禁用 anchors.fill —— 卡高取决于内容、
-            // 内容又填满卡 = 循环依赖,整张卡会塌成一条
-            ColumnLayout {
-                anchors { left: parent.left; right: parent.right; top: parent.top }
-                spacing: Theme.s3
-
-                // 汇总条:通过/失败/待测计数,先给结论再给明细(倒金字塔)
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: Theme.s4
-
-                    Repeater {
-                        model: [
-                            { label: "通过",   n: counts.pass, c: Theme.pass },
-                            { label: "失败",   n: counts.fail, c: Theme.fail },
-                            { label: "执行中", n: counts.run,  c: Theme.running },
-                            { label: "待测",   n: counts.wait, c: Theme.textSecondary },
-                            { label: "缺能力", n: counts.miss, c: Theme.fail }
-                        ]
-                        Row {
-                            required property var modelData
-                            spacing: Theme.s1
-                            Text {
-                                text: modelData.n
-                                color: modelData.c
-                                font.family: TypeScale.family
-                                font.pointSize: TypeScale.heading
-                                font.weight: TypeScale.weightBold
-                            }
-                            Text {
-                                text: modelData.label
-                                color: Theme.textDim
-                                font.family: TypeScale.family
-                                font.pointSize: TypeScale.caption
-                                anchors.baseline: parent.children[0].baseline
-                            }
-                        }
-                    }
-
-                    Item { Layout.fillWidth: true }
-
-                    Text {
-                        text: "SupportedItems  0x" + root.supportedItemsLive.toString(16).toUpperCase()
-                              + (root.infoConnected ? "" : " (未连接)")
-                        color: Theme.textDim
-                        font.family: "Consolas"
-                        font.pointSize: TypeScale.caption
-                    }
-                }
-
-                Rectangle { Layout.fillWidth: true; height: 1; color: Theme.border }
-
-                // 用 Repeater 不用 ListView:自动项只 3 行且固定,
-                // ListView 的 contentHeight 在布局时为 0,会把整张卡压没
-                Column {
-                    Layout.fillWidth: true
-                    spacing: 2
-
-                    Repeater {
-                        model: autoRows
-                        TestItemRow {
-                            required property var modelData
-                            width: parent.width
-                            model: modelData
-                        }
-                    }
-                }
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: Theme.s3
-
-                    AppButton {
-                        text: root.autoRunning ? "自动测试中…" : "开始自动化测试"
-                        glyph: Icons.play
-                        kind: "primary"
-                        Layout.fillWidth: true
-                        enabled: !root.autoRunning
-                        // 逐项下发 PtestPeripheralTest,结果按 RequestId 回填行状态;
-                        // 全部收尾后开放人工判定面板
-                        onClicked: root.startAutoTest()
-                    }
-                    AppButton {
-                        text: "跳过当前项"
-                        glyph: Icons.skip
-                        // 权限矩阵:跳过=工程师+;技术员直接隐藏(SW_HIDE 惯例)
-                        visible: Session.canSkipItem
-                        // 跳过=质量口径的人工决定 → 确认;开始自动化测试可重来,不设卡
-                        onClicked: confirm.ask("跳过当前项？",
-                            "该测试项将标记为跳过并继续下一项，跳过记录会进产测台账。",
-                            function () { /* 真实实现:跳过并推进 */ })
-                    }
-                }
-            }
-        }
-
-            // 人工判定面板:自动项跑完后集中确认四个人工项。
-            // 设备回 ok 只代表"指令执行了",发光/出声固件感知不到。
-            ManualVerifyPanel {
-                id: manualPanel
+            SequentialTestPanel {
+                id: seqPanel
                 Layout.fillWidth: true
+                Layout.fillHeight: true
+                queue: root.testQueue
             }
 
-            }
-        }
-
-            // 写标识条。钉在中栏底部,不进 ScrollView —— 永远可见可点。
+            // 写标识条:结果确认后才跳出(需求②/补充)。钉在中栏底部。
             Rectangle {
+                visible: seqPanel.confirmed
                 Layout.fillWidth: true
-                // 高度取按钮实高 + 上下内距。用 s3 而非 s4 ——
-                // 1180x720(窗口最小尺寸)下 s4 会让操作条被窗口底边切掉一线。
                 Layout.preferredHeight: writeRow.implicitHeight + Theme.s3 * 2
                 Layout.minimumHeight: Theme.hit + Theme.s3 * 2
                 color: Theme.surface
@@ -530,75 +362,73 @@ Item {
                 border.width: 1
                 border.color: Theme.borderSoft
 
-            RowLayout {
-                id: writeRow
-                anchors.fill: parent
-                anchors.margins: Theme.s3
-                spacing: Theme.s3
+                RowLayout {
+                    id: writeRow
+                    anchors.fill: parent
+                    anchors.margins: Theme.s3
+                    spacing: Theme.s3
 
-                // 成品:MAC 输入。默认带出第一条未入库记录,可改;
-                // 校验 = 必须在批次内 且 未被使用过(入库标记=0)。
-                ColumnLayout {
-                    visible: !root.semi
-                    spacing: 2
-                    Layout.preferredWidth: 230
+                    // 成品:MAC 输入(默认带出第一条未入库,可改,双重校验)
+                    ColumnLayout {
+                        visible: !root.semi
+                        spacing: 2
+                        Layout.preferredWidth: 230
 
-                    TextField {
-                        id: macField
-                        Layout.fillWidth: true
-                        placeholderText: "MAC 地址"
-                        enabled: !root.chainBusy
-                        font.family: "Consolas"
-                        font.pointSize: TypeScale.body
+                        TextField {
+                            id: macField
+                            Layout.fillWidth: true
+                            placeholderText: "MAC 地址"
+                            enabled: !root.chainBusy
+                            font.family: "Consolas"
+                            font.pointSize: TypeScale.body
+                        }
+                        Text {
+                            Layout.fillWidth: true
+                            text: root.semi ? ""
+                                  : (root.macError.length > 0 ? root.macError
+                                     : "SN " + Session.batchRecords[root.macIndex][1])
+                            color: root.macError.length > 0 ? Theme.fail : Theme.pass
+                            font.family: TypeScale.family
+                            font.pointSize: TypeScale.caption
+                            elide: Text.ElideRight
+                        }
                     }
+
+                    AppButton {
+                        text: semi ? "写准成品标识" : "写成品标识"
+                        glyph: Icons.save
+                        kind: "primary"
+                        enabled: root.testsClean && !root.chainBusy
+                                 && root.chainPhase !== "done"
+                                 && (root.semi || root.macError.length === 0)
+                        onClicked: confirm.ask(
+                            semi ? "写入准成品标识？" : "写入成品标识？",
+                            semi ? "将写入准成品（Stage=2）时间戳并回读核对，随后自动执行：配置清除 → 定时关机（"
+                                   + FactoryConfig.shutdownDelaySec + " 秒）。"
+                                 : "将写入该 MAC 对应批次记录的产测信息与成品标识，随后自动执行：采集信息入库（IMEI+校验）→ 配置清除 → 定时关机（"
+                                   + FactoryConfig.shutdownDelaySec + " 秒）。",
+                            function () { root.doWriteStage() })
+                    }
+
                     Text {
                         Layout.fillWidth: true
-                        text: root.semi ? ""
-                              : (root.macError.length > 0 ? root.macError
-                                 : "SN " + Session.batchRecords[root.macIndex][1])
-                        color: root.macError.length > 0 ? Theme.fail : Theme.pass
+                        visible: root.chainPhase === "failed"
+                                 || (!root.testsClean && root.writtenStamp.length === 0)
+                        text: {
+                            if (root.chainPhase === "failed")
+                                return "流程失败: " + root.chainError;
+                            return "有未通过/跳过的测试项，不能写标识";
+                        }
+                        color: Theme.warn
                         font.family: TypeScale.family
-                        font.pointSize: TypeScale.caption
-                        elide: Text.ElideRight
+                        font.pointSize: TypeScale.body
+                        wrapMode: Text.WordWrap
                     }
                 }
-
-                AppButton {
-                    text: semi ? "写准成品标识" : "写成品标识"
-                    glyph: Icons.save
-                    kind: "primary"
-                    // 写入条件 canWrite + 成品需 MAC 校验通过;链在途/已完成禁用
-                    enabled: root.canWrite && !root.chainBusy
-                             && root.chainPhase !== "done"
-                             && (root.semi || root.macError.length === 0)
-                    onClicked: confirm.ask(semi ? "写入准成品标识？" : "写入成品标识？",
-                        semi ? "将写入准成品（Stage=2）完成时间戳并回读核对，随后自动执行：配置清除 → 定时关机（120 秒）。"
-                             : "将写入该 MAC 对应批次记录的产测信息与成品标识，随后自动执行：采集信息入库（IMEI+校验）→ 配置清除 → 定时关机（120 秒）。",
-                        function () { root.doWriteStage() })
-                }
-
-                Text {
-                    Layout.fillWidth: true
-                    visible: root.chainPhase === "failed"
-                             || (!root.canWrite && root.writtenStamp.length === 0)
-                    text: {
-                        if (root.chainPhase === "failed") return "流程失败: " + root.chainError;
-                        if (!root.autoStarted) return "先完成外设自动项测试";
-                        if (root.autoRunning || counts.run > 0) return "自动项执行中…";
-                        if (counts.fail > 0 || counts.miss > 0) return "自动项有未通过";
-                        if (!manualPanel.allDone) return "人工判定未完成";
-                        return "人工判定有异常项";
-                    }
-                    color: Theme.warn
-                    font.family: TypeScale.family
-                    font.pointSize: TypeScale.body
-                    wrapMode: Text.WordWrap
-                }
-            }
             }
         }
 
-        // ---- 右:结果 + 设备信息 ----
+        // ---- 右:结果 + 拉流 + 设备信息 ----
         ColumnLayout {
             Layout.preferredWidth: 320
             Layout.fillWidth: false
@@ -609,32 +439,33 @@ Item {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 172
                 state_: {
-                    if (counts.fail > 0 || counts.miss > 0 || manualPanel.anyFail) return "fail";
-                    if (manualPanel.allDone) return "pass";
-                    if (counts.run > 0) return "running";
+                    if (root.chainPhase === "failed") return "fail";
+                    if (seqPanel.confirmed && seqPanel.anyBad) return "fail";
+                    if (root.chainPhase === "done") return "pass";
+                    if (seqPanel.confirmed) return "pass";
+                    if (seqPanel.phase === "running" || seqPanel.settled > 0
+                        || seqPanel.phase === "summary") return "running";
                     return "idle";
                 }
                 caption: {
-                    if (counts.fail > 0 || counts.miss > 0) return "自动项不通过";
-                    if (manualPanel.anyFail) return "人工判定不通过";
-                    if (manualPanel.allDone) return "全部通过，可写标识";
-                    if (manualPanel.ready) return "待人工判定  " + manualPanel.settledCount
-                                                  + " / " + manualPanel.checks.length;
-                    if (counts.run > 0) return "自动项执行中";
-                    return "待开始";
+                    if (root.chainPhase === "done")
+                        return "流程完成，设备 " + FactoryConfig.shutdownDelaySec + " 秒后关机";
+                    if (root.chainPhase === "failed") return "自动链失败，见底部原因";
+                    if (seqPanel.confirmed)
+                        return seqPanel.anyBad ? "有未通过项，转维修" : "结果已确认，可写标识";
+                    if (seqPanel.phase === "summary") return "请确认测试结果（回车确认）";
+                    if (seqPanel.total === 0) return "无勾选测试项";
+                    return "逐项测试  " + seqPanel.settled + " / " + seqPanel.total;
                 }
             }
 
-            // 拉流小窗。这两个工位不调焦，但仍要确认"画面确实出来了"
-            // （摄像头模块虚焊/排线松在这里最容易暴露）。小窗看不清细节时
-            // 双击进入全屏，Esc 退回。
+            // 拉流小窗:这两个工位不调焦,但要确认"画面确实出来了"
+            //(摄像头虚焊/排线松最容易在这暴露)。双击全屏,Esc 退回。
             Card {
                 id: liveCard
                 title: "实时画面"
                 titleIcon: Icons.navFocus
                 Layout.fillWidth: true
-                // 固定高度而非 fitContent:内容用 anchors 撑满时
-                // fitContent 的 childrenRect 会成绑定环。
                 Layout.preferredHeight: 180 + Theme.s6 + Theme.s4
 
                 LivePreview {
@@ -644,8 +475,8 @@ Item {
                     height: 180
                     compact: true
                     showGrid: false
-                    hint: ""              // 小窗不放提示文字，画面干净
-                    showZoomHint: false   // 双击全屏功能保留，只是不提示
+                    hint: ""
+                    showZoomHint: false
                     onFullscreenRequested:
                         liveFull.open((root.semi ? "准成品" : "成品") + " · 实时画面")
                 }
@@ -657,18 +488,21 @@ Item {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
 
-                // 全部取设备真实上报(devInfo),未连接显示 "—"。
+                // 全部取设备真实上报(devInfo),未上报显示 "—"。
+                // 准成品阶段设备还没写身份(成品工位才写),身份类字段只在成品显示
+                //(2026-08-17 补充需求:准成品不取 IMEI)。
                 Column {
                     anchors { left: parent.left; right: parent.right; top: parent.top }
                     spacing: Theme.s3
 
-                    FieldRow { width: parent.width; label: "IMEI";    value: root.dv("Imei") }
-                    FieldRow { width: parent.width; label: "UUID";    value: root.dv("Uuid") }
-                    FieldRow { width: parent.width; label: "MAC";     value: root.dv("Mac") }
-                    FieldRow { width: parent.width; label: "SN";      value: root.dv("Sn") }
-                    FieldRow { width: parent.width; label: "软件";    value: root.dv("SwVersion") }
-                    FieldRow { width: parent.width; label: "硬件";    value: root.dv("HwVersion") }
+                    FieldRow { visible: !root.semi; width: parent.width; label: "IMEI"; value: root.dv("Imei") }
+                    FieldRow { visible: !root.semi; width: parent.width; label: "UUID"; value: root.dv("Uuid") }
+                    FieldRow { visible: !root.semi; width: parent.width; label: "MAC";  value: root.dv("Mac") }
+                    FieldRow { visible: !root.semi; width: parent.width; label: "SN";   value: root.dv("Sn") }
+                    FieldRow { width: parent.width; label: "软件"; value: root.dv("SwVersion") }
+                    FieldRow { width: parent.width; label: "硬件"; value: root.dv("HwVersion") }
                     FieldRow {
+                        visible: !root.semi
                         width: parent.width
                         label: "密钥校验"
                         value: root.dv("SecretCrc32")
@@ -677,8 +511,7 @@ Item {
 
                     Rectangle { width: parent.width; height: 1; color: Theme.border }
 
-                    // 回读值即设备侧真值 —— 工人核对的是"设备里现在是什么",
-                    // 本工位刚写入的那一行标绿。
+                    // 回读值即设备侧真值;本工位刚写入的那一行标绿
                     FieldRow {
                         width: parent.width; label: "调焦"
                         value: root.dv("FocusTime")
@@ -701,9 +534,8 @@ Item {
         }
     }
 
-    // 自动链等待层:写标识后的自动步骤(采集入库/配置清除/定时关机)期间盖住
-    // 全页 —— 样式对齐拉流建联的转圈(BusyIndicator)。done/failed 自动收起;
-    // MouseArea 拦截点击,链执行期间不允许任何操作。
+    // 自动链等待层:写标识后的自动步骤期间盖住全页(样式对齐拉流建联转圈)。
+    // done/failed 自动收起;MouseArea 拦截点击,链执行期间不允许任何操作。
     Rectangle {
         anchors.fill: parent
         visible: root.chainBusy
@@ -729,7 +561,8 @@ Item {
                         return root.semi ? "正在写入准成品标识…" : "正在写入产测信息与成品标识…";
                     if (root.chainPhase === "collect") return "采集信息入库：获取 IMEI 并校验…";
                     if (root.chainPhase === "clear") return "配置清除：恢复出厂设置…";
-                    if (root.chainPhase === "shutdown") return "下发定时关机（120 秒）…";
+                    if (root.chainPhase === "shutdown")
+                        return "下发定时关机（" + FactoryConfig.shutdownDelaySec + " 秒）…";
                     return "";
                 }
                 color: Theme.textPrimary

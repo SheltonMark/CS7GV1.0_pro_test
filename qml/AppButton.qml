@@ -18,6 +18,11 @@ import ptest
 Button {
     id: ctl
 
+    // 不抢键盘焦点 —— 工位页是键盘流(空格/回车/回格驱动),按钮拿了焦点后
+    // 空格会变成"再点一次按钮"而不是开始测试(2026-08-17 实测 bug)。
+    // 本工具无 Tab 键盘导航需求,产线全是鼠标点按钮+快捷键组合。
+    focusPolicy: Qt.NoFocus
+
     property string kind: "normal"   // primary | normal | danger
     // 不叫 icon —— Button 基类的 icon 是 FINAL 分组属性，同名声明直接组件加载失败
     property string glyph: ""

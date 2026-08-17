@@ -80,7 +80,9 @@ ApplicationWindow {
                 station: rail.currentIndex < rail.entries.length
                          ? rail.entries[rail.currentIndex].key : ""
                 isStation: rail.currentIndex < rail.stations.length
-                online: true
+                // 在线 = 设备心跳新鲜(CloudClient 按 PtestHeartbeat.LastUpdate 判,
+                // 腾讯云自带的在线状态有延迟不可靠 —— 2026-08-17 需求)
+                online: CloudClient.online
                 mismatch: win.mismatch
             }
 

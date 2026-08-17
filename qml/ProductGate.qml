@@ -69,7 +69,8 @@ Item {
 
                 HoverHandler { id: hh; enabled: card.usable }
                 TapHandler {
-                    enabled: card.usable
+                    // 悬停在"测试项"按钮上时禁掉整卡点击,防止点按钮误选中产品
+                    enabled: card.usable && !cfgHover.hovered
                     onTapped: Session.profile = card.modelData
                 }
 
@@ -120,6 +121,10 @@ Item {
                         Text {
                             // 工位数也列出来:不同产品工艺路线不同(射频线多三站),
                             // 选产品时就能看出差异,不用进去才发现。
+                            // ⚠️ 必须可压缩(fillWidth+elide):这行不肯让步的话,
+                            // 加上"测试项"按钮后行宽超限,右侧小三角会被顶出卡片。
+                            Layout.fillWidth: true
+                            elide: Text.ElideRight
                             text: card.usable
                                   ? "ProductId  " + card.modelData.productId
                                     + "   ·   工位 " + card.modelData.stations.length + " 站"
@@ -129,6 +134,20 @@ Item {
                             font.family: "Consolas"
                             font.pointSize: TypeScale.caption
                         }
+                    }
+
+                    // 管理员动作(需求① 2026-08-17):配置本产品准成品/成品的
+                    // 测试项勾选。普通角色不可见。
+                    AppButton {
+                        id: cfgBtn
+                        visible: card.usable && Session.isSuper
+                        text: "测试项"
+                        glyph: Icons.navFinished
+                        implicitHeight: Theme.hit - 12
+                        Layout.alignment: Qt.AlignVCenter
+                        onClicked: itemCfg.openFor(card.modelData)
+                        // 悬停感知放按钮内部:用于禁掉整卡点击,防误选产品
+                        HoverHandler { id: cfgHover }
                     }
 
                     // 待建模产品可见但置灰(规则6):看得见"它在计划里",选不进坏会话
@@ -216,6 +235,172 @@ Item {
             font.family: TypeScale.family
             font.pointSize: TypeScale.body
             wrapMode: Text.WordWrap
+        }
+    }
+
+    // 勾选框(测试项配置用):user 交互会打断 checked 绑定,靠 onSelChanged
+    // 显式回同步 —— 否则点"全选"后单项框不刷新(QML 绑定被交互覆盖的老坑)。
+    component SelBox: CheckBox {
+        id: box
+        property string st: ""
+        property string grp: ""
+        property string keyName: ""
+        checked: itemCfg.isOn(st, grp, keyName)
+        onToggled: itemCfg.setSel(st, grp, keyName, checked)
+        font.family: TypeScale.family
+        font.pointSize: TypeScale.body
+        Connections {
+            target: itemCfg
+            function onSelChanged() {
+                box.checked = itemCfg.isOn(box.st, box.grp, box.keyName);
+            }
+        }
+    }
+
+    // 测试项配置(需求① 2026-08-17):按 工位 × 自动/人工 分组勾选 + 组内全选。
+    // 保存进 factory_config.json(FactoryConfig 单例),工厂也可直接改文件;
+    // 工位页的测试队列 = 此处勾选 ∩ 产品 profile ∩ 设备 SupportedItems。
+    Dialog {
+        id: itemCfg
+        modal: true
+        anchors.centerIn: parent
+        title: "测试项配置" + (product !== null ? " · " + product.name : "")
+        standardButtons: Dialog.Save | Dialog.Cancel
+
+        property var product: null
+        readonly property var autoAll: product !== null
+            ? product.items.filter(b => MockData.manualBits.indexOf(b) < 0) : []
+        // sel[station][group][key] = bool。整对象替换触发刷新(selChanged)。
+        property var sel: ({})
+
+        function openFor(p) {
+            product = p;
+            const manualAll = MockData.manualChecks.map(c => c.key);
+            const aAll = p.items.filter(b => MockData.manualBits.indexOf(b) < 0);
+            var s = {};
+            ["semi", "finished"].forEach(function (st) {
+                const a = FactoryConfig.stationItems(p.productId, st, "auto", aAll);
+                const m = FactoryConfig.stationItems(p.productId, st, "manual", manualAll);
+                var sa = {}, sm = {};
+                aAll.forEach(function (b) { sa[b] = a.indexOf(b) >= 0; });
+                manualAll.forEach(function (k) { sm[k] = m.indexOf(k) >= 0; });
+                s[st] = { auto: sa, manual: sm };
+            });
+            sel = s;
+            open();
+        }
+
+        function setSel(st, grp, key, val) {
+            var s = JSON.parse(JSON.stringify(sel));
+            s[st][grp][key] = val;
+            sel = s;
+        }
+        function setAll(st, grp, val) {
+            var s = JSON.parse(JSON.stringify(sel));
+            for (var k in s[st][grp]) s[st][grp][k] = val;
+            sel = s;
+        }
+        function allOn(st, grp) {
+            if (sel[st] === undefined) return false;
+            for (var k in sel[st][grp]) if (!sel[st][grp][k]) return false;
+            return true;
+        }
+        function isOn(st, grp, key) {
+            return sel[st] !== undefined && sel[st][grp][key] === true;
+        }
+
+        onAccepted: {
+            ["semi", "finished"].forEach(function (st) {
+                var a = [], m = [];
+                for (var b in sel[st].auto) if (sel[st].auto[b]) a.push(parseInt(b));
+                for (var k in sel[st].manual) if (sel[st].manual[k]) m.push(k);
+                FactoryConfig.setStationItems(itemCfg.product.productId, st, "auto", a);
+                FactoryConfig.setStationItems(itemCfg.product.productId, st, "manual", m);
+            });
+        }
+
+        contentItem: Row {
+            spacing: Theme.s6
+            padding: Theme.s2
+
+            Repeater {
+                model: [{ st: "semi", name: "准成品" }, { st: "finished", name: "成品" }]
+
+                Column {
+                    required property var modelData
+                    readonly property string st: modelData.st
+                    spacing: Theme.s1
+                    width: 250
+
+                    Text {
+                        text: modelData.name
+                        color: Theme.textPrimary
+                        font.family: TypeScale.family
+                        font.pointSize: TypeScale.heading
+                        font.weight: TypeScale.weightBold
+                        bottomPadding: Theme.s2
+                    }
+
+                    // 全选框不用 SelBox —— 它的回同步键是 "__all__" 会被拍回
+                    // false;这里显式按 allOn 回同步。
+                    CheckBox {
+                        id: allAuto
+                        text: "自动测试（全选）"
+                        font.family: TypeScale.family
+                        font.pointSize: TypeScale.body
+                        font.weight: TypeScale.weightBold
+                        checked: itemCfg.allOn(parent.st, "auto")
+                        onToggled: itemCfg.setAll(parent.st, "auto", checked)
+                        Connections {
+                            target: itemCfg
+                            function onSelChanged() {
+                                allAuto.checked = itemCfg.allOn(allAuto.parent.st, "auto");
+                            }
+                        }
+                    }
+                    Repeater {
+                        model: itemCfg.autoAll
+                        SelBox {
+                            required property var modelData
+                            st: parent.st; grp: "auto"
+                            keyName: "" + modelData
+                            leftPadding: Theme.s5
+                            text: {
+                                const it = MockData.itemByBit(modelData);
+                                return it ? it.name : ("bit" + modelData);
+                            }
+                        }
+                    }
+
+                    CheckBox {
+                        id: allManual
+                        text: "人工判定（全选）"
+                        font.family: TypeScale.family
+                        font.pointSize: TypeScale.body
+                        font.weight: TypeScale.weightBold
+                        checked: itemCfg.allOn(parent.st, "manual")
+                        onToggled: itemCfg.setAll(parent.st, "manual", checked)
+                        Connections {
+                            target: itemCfg
+                            function onSelChanged() {
+                                allManual.checked = itemCfg.allOn(allManual.parent.st, "manual");
+                            }
+                        }
+                    }
+                    Repeater {
+                        model: MockData.manualChecks
+                        SelBox {
+                            required property var modelData
+                            st: parent.st; grp: "manual"
+                            keyName: modelData.key
+                            leftPadding: Theme.s5
+                            // 只列项目名,不带判据说明(拥挤);指示灯按颜色区分
+                            text: modelData.group
+                                  + (modelData.short.length > 0 ? " · " + modelData.short : "")
+                        }
+                    }
+                }
+            }
         }
     }
 }
