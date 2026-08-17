@@ -3,13 +3,13 @@ import ptest
 import QtQuick.Controls
 import QtQuick.Layouts
 
-// 逐项测试面板(需求②+反馈迭代 2026-08-17)：中栏一次只展示一个测试项，键盘驱动。
-//   空格 = 开始(自动项:按一次连跑全部勾选的自动项) / 失败后重测
-//   ↑/↓ = 上一项/下一项(也有按钮)      人工项判定：回车 = 正常，回格 = 异常
-//   每项结果以 toast 气泡在卡片中间反馈(约 0.9s)后自动进下一项;
-//   结果展示期间按键一律忽略 —— 防手快连按导致误触发(实测 bug 来源)。
+// 逐项测试面板(2026-08-17 流程简化版)：工人只做两件事 —— 点一次开始、给判定。
+//   「开始测试」(鼠标或空格) → 自动项连续执行 → 人工项逐条**自动下发**
+//   (下发中转圈) → 直接出判定页：回车 = 正常，空格 = 异常 → 判完即下发下一条。
+//   每项结果以 toast 气泡在卡片中间反馈(约 0.9s);展示期间按键忽略(防连按)。
+//   自动项失败停留(空格重测/工程师跳过/↑↓换项);人工判异常已是终局记录,照常前进。
 //   全部测完 → 汇总页：回车 = 确认结果(进写标识)，回格 = 返回可重测。
-// 失败停留可重测，工程师及以上可跳过；有失败/跳过最终不能写标识(定稿口径)。
+// 有失败/跳过最终不能写标识(定稿口径)。
 FocusScope {
     id: panel
 
@@ -22,8 +22,6 @@ FocusScope {
     //     | shown 结果气泡展示(按键屏蔽) | summary 汇总确认 | confirmed 已确认
     property string phase: "idle"
     property int pendingReq: -1
-    // 自动项连跑:空格启动第一个自动项后,后续自动项不再要空格(反馈#4)
-    property bool chainAuto: false
     property string toastText: ""
     property string toastStatus: "pass"   // pass | fail | skip
 
@@ -47,14 +45,20 @@ FocusScope {
         cursor = 0;
         results = ({});
         pendingReq = -1;
-        chainAuto = false;
         toastText = "";
-        phase = queue.length > 0 ? "item" : "idle";
+        phase = queue.length > 0 ? "ready" : "idle";
+    }
+
+    // 「开始测试」:从头链式执行整条队列(自动项直接跑,人工项下发后出判定页)
+    function startAll() {
+        if (phase !== "ready" || total === 0) return;
+        cursor = 0;
+        phase = "item";
+        startCurrent();
     }
 
     function startCurrent() {
         if (phase !== "item" || !current) return;
-        chainAuto = current.kind === "auto";
         if (current.miss) {
             record("fail", "设备缺能力（SupportedItems 未含该项）");
             return;
@@ -98,9 +102,10 @@ FocusScope {
 
     function afterShown() {
         const failed = currentResult !== undefined && currentResult.status === "fail";
-        if (failed) {
-            chainAuto = false;
-            phase = "item";               // 失败停留:空格重测/跳过/↑↓换项
+        // 自动项失败停留(设备问题要现场处理:重测/跳过/换项);
+        // 人工判异常已是工人的终局结论,记录后照常前进(2026-08-17 简化流)。
+        if (failed && current !== null && current.kind === "auto") {
+            phase = "item";
             return;
         }
         const nxt = nextUnsettledAfter(cursor);
@@ -110,16 +115,11 @@ FocusScope {
         }
         cursor = nxt;
         phase = "item";
-        // 自动项连跑;遇到人工项停下等空格
-        if (chainAuto && current !== null && current.kind === "auto")
-            startCurrent();
-        else
-            chainAuto = false;
+        startCurrent();                   // 链式:下一项自动下发,人工项直接出判定页
     }
 
     function nav(delta) {
         if (phase !== "item") return;
-        chainAuto = false;
         const next = cursor + delta;
         if (next < 0 || next >= total) return;
         cursor = next;
@@ -176,13 +176,14 @@ FocusScope {
     Keys.onPressed: (event) => {
         // shown/running 相位一律忽略按键:结果展示与指令在途时手快连按不生效
         if (event.key === Qt.Key_Space) {
-            if (phase === "item") { startCurrent(); event.accepted = true; }
+            if (phase === "ready") { startAll(); event.accepted = true; }
+            else if (phase === "item") { startCurrent(); event.accepted = true; }
+            else if (phase === "judge") { judge(false); event.accepted = true; }  // 空格=异常
         } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-            if (phase === "judge") { judge(true); event.accepted = true; }
+            if (phase === "judge") { judge(true); event.accepted = true; }        // 回车=正常
             else if (phase === "summary") { confirmResults(); event.accepted = true; }
         } else if (event.key === Qt.Key_Backspace) {
-            if (phase === "judge") { judge(false); event.accepted = true; }
-            else if (phase === "summary") { backToItems(); event.accepted = true; }
+            if (phase === "summary") { backToItems(); event.accepted = true; }
         } else if (event.key === Qt.Key_Up) {
             if (phase === "item") { nav(-1); event.accepted = true; }
         } else if (event.key === Qt.Key_Down) {
@@ -245,7 +246,7 @@ FocusScope {
                 Layout.fillWidth: true
                 Layout.topMargin: Theme.s2
                 visible: panel.total > 0 && panel.phase !== "summary"
-                         && panel.phase !== "confirmed"
+                         && panel.phase !== "confirmed" && panel.phase !== "ready"
                 spacing: Theme.s3
 
                 AppButton {
@@ -321,6 +322,41 @@ FocusScope {
                         font.family: TypeScale.family
                         font.pointSize: TypeScale.heading * 1.2
                         font.weight: TypeScale.weightBold
+                        anchors.horizontalCenter: parent.horizontalCenter
+                    }
+                }
+
+                // 就绪页:一颗开始按钮(鼠标/空格),之后整条队列链式执行
+                Column {
+                    visible: panel.phase === "ready"
+                    anchors.centerIn: parent
+                    spacing: Theme.s4
+
+                    Text {
+                        text: "共 " + panel.total + " 项测试（自动 + 人工）"
+                        color: Theme.textSecondary
+                        font.family: TypeScale.family
+                        font.pointSize: TypeScale.heading
+                        anchors.horizontalCenter: parent.horizontalCenter
+                    }
+                    AppButton {
+                        text: "开始测试"
+                        glyph: Icons.play
+                        kind: "primary"
+                        implicitHeight: Theme.hit + 10
+                        implicitWidth: 220
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        onClicked: { panel.startAll(); panel.forceActiveFocus(); }
+                    }
+                    KeyHint {
+                        cap: "空格"; label: "开始"
+                        anchors.horizontalCenter: parent.horizontalCenter
+                    }
+                    Text {
+                        text: "自动项连续执行；人工项自动下发后直接判定：回车 = 正常，空格 = 异常"
+                        color: Theme.textDim
+                        font.family: TypeScale.family
+                        font.pointSize: TypeScale.body
                         anchors.horizontalCenter: parent.horizontalCenter
                     }
                 }
@@ -431,25 +467,12 @@ FocusScope {
                         }
                     }
 
-                    // 未测 → 空格开始(自动项提示连跑)
-                    Column {
+                    // 未测项停留态只在手动导航(↑↓)到未测项时出现;
+                    // 正常链式流程不会停在这里。
+                    KeyHint {
                         visible: panel.phase === "item" && panel.currentResult === undefined
-                        spacing: Theme.s2
+                        cap: "空格"; label: "执行本项"
                         anchors.horizontalCenter: parent.horizontalCenter
-                        KeyHint {
-                            cap: "空格"
-                            label: panel.current !== null && panel.current.kind === "auto"
-                                   ? "开始自动测试" : "开始测试"
-                            anchors.horizontalCenter: parent.horizontalCenter
-                        }
-                        Text {
-                            visible: panel.current !== null && panel.current.kind === "auto"
-                            text: "自动项将连续执行，无需逐项按键"
-                            color: Theme.textDim
-                            font.family: TypeScale.family
-                            font.pointSize: TypeScale.body
-                            anchors.horizontalCenter: parent.horizontalCenter
-                        }
                     }
 
                     Column {
@@ -485,7 +508,7 @@ FocusScope {
                             spacing: Theme.s5
                             anchors.horizontalCenter: parent.horizontalCenter
                             KeyHint { cap: "回车"; label: "正常"; labelColor: Theme.pass }
-                            KeyHint { cap: "回格"; label: "异常"; labelColor: Theme.fail }
+                            KeyHint { cap: "空格"; label: "异常"; labelColor: Theme.fail }
                         }
                     }
                 }
