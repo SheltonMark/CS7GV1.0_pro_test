@@ -5,9 +5,9 @@ cmake_minimum_required(VERSION 3.21)
 #
 # 版本号是产线工具的硬要求：界面要看得到，将来每条产测记录也要带上它，
 # 否则批量误判无法追溯是哪个版本干的。此处是唯一来源。
-project(ptest_pc_client VERSION 0.1.5 LANGUAGES CXX)
+project(ptest_pc_client VERSION 0.1.6 LANGUAGES CXX)
 
-find_package(Qt6 6.7 REQUIRED COMPONENTS Quick QuickControls2)
+find_package(Qt6 6.7 REQUIRED COMPONENTS Quick QuickControls2 Network)
 
 qt_standard_project_setup(REQUIRES 6.7)
 
@@ -32,13 +32,17 @@ qt_add_executable(app_ptest src/main.cpp ${CMAKE_BINARY_DIR}/Application.rc)
 # `#if __has_include(<file_io.hpp>)` 尖括号查找带 QML_ELEMENT 的头，
 # 找不到就静默跳过 include、然后报 "'FileIo' was not declared in this scope"
 # —— 错误信息指向生成的文件，看不出根因是包含路径。
-target_include_directories(app_ptest PRIVATE src)
+# ⚠️ 带 QML_ELEMENT 的头所在目录都必须单独列进来——注册文件按**文件名**
+# 尖括号查找（<cloud_client.hpp> 而非 <cloud/cloud_client.hpp>），
+# 少列的表现是 "'CloudClient' was not declared in this scope"。
+target_include_directories(app_ptest PRIVATE src src/cloud)
 
 # qt_add_qml_module 只带进 Qml 依赖；QGuiApplication 来自 Gui、
 # QQuickStyle 来自 QuickControls2，必须显式链，否则连头文件都找不到。
 target_link_libraries(app_ptest PRIVATE
     Qt6::Quick
-    Qt6::QuickControls2)
+    Qt6::QuickControls2
+    Qt6::Network)
 
 # ⚠️ 这两段 set_source_files_properties 必须写在 qt_add_qml_module **之前**。
 # 写在后面 CMake 不报错、构建也过，但属性静默失效 —— 单例不会被注册成单例，
@@ -89,6 +93,7 @@ qt_add_qml_module(app_ptest
         qml/ViewPending.qml
         qml/ViewBatchFiles.qml
         qml/ViewAbout.qml
+        qml/ViewCloudDebug.qml
         qml/ProductGate.qml
         qml/ViewLogin.qml
     SOURCES
@@ -96,6 +101,20 @@ qt_add_qml_module(app_ptest
         # 解析与列语义留在 QML（列定义还没和产线定死，改 QML 不必重编 C++）。
         src/file_io.hpp
         src/file_io.cpp
+        # 云链路层（2026-08-17 起）：CloudClient 是 QML 单例入口，指令串行 +
+        # RequestId 闭环；传输可切换（Mock / 腾讯云 API3.0 直连），由 exe 同目录
+        # cloud_config.json 决定，密钥文件不进 git。
+        src/cloud/cloud_reply.hpp
+        src/cloud/crc32.hpp
+        src/cloud/i_cloud_transport.hpp
+        src/cloud/tc3_signer.hpp
+        src/cloud/tc3_signer.cpp
+        src/cloud/mock_transport.hpp
+        src/cloud/mock_transport.cpp
+        src/cloud/tencent_api_transport.hpp
+        src/cloud/tencent_api_transport.cpp
+        src/cloud/cloud_client.hpp
+        src/cloud/cloud_client.cpp
     RESOURCES
         # logo 与 QML 同目录，QML 里直接写 "logo.png" 即可
         resources/logo.png

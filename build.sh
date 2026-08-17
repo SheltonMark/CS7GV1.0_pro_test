@@ -71,6 +71,14 @@ rm -rf "$DIST_WORK"/qml/QtQuick/Controls/Imagine \
 mkdir -p "$DIST_WORK/sample"
 cp "$HERE/resources/sample/inputdata1_sample.txt" "$DIST_WORK/sample/"
 
+# 云配置：sample 始终随包发（产线机照着填）；仓库根若有 cloud_config.json
+#（本机联调密钥，已 gitignore）也带进 dist。注意用 if 而不是 && —— set -e
+# 下 [ -f ] && cp 在文件缺失时会把整个构建判失败。
+cp "$HERE/resources/cloud_config.sample.json" "$DIST_WORK/"
+if [ -f "$HERE/cloud_config.json" ]; then
+    cp "$HERE/cloud_config.json" "$DIST_WORK/"
+fi
+
 # 注意：opengl32sw.dll（约 20MB）是软件 OpenGL 兜底，故意保留。
 # 产线电脑常是低配机/显卡驱动不全/远程桌面登录，缺它会白屏或崩，
 # 省这 20MB 不值得拿停线风险换。

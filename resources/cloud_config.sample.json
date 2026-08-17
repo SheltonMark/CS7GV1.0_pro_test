@@ -1,0 +1,8 @@
+{
+  "_说明": "复制本文件为 cloud_config.json 放在 ProductTestTool.exe 同目录，填入云 API 密钥后软件走腾讯云直连；缺失或密钥为空则为 Mock 假设备。密钥文件不得提交 git、不得截图外传。",
+  "secretId": "",
+  "secretKey": "",
+  "region": "ap-guangzhou",
+  "productId": "5KHBENFCX2",
+  "deviceName": "1000000003"
+}

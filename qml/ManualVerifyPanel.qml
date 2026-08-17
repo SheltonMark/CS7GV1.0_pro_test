@@ -56,25 +56,62 @@ Card {
 
     // 每项是否已下发测试指令。未下发 → 判定按钮禁用。
     property var dispatched: ({})
-    // 正在下发的项（demo 里模拟云端往返延迟）
+    // 正在下发的项与其 RequestId（云链路真实闭环，2026-08-17 接入）
     property string pendingKey: ""
+    property int pendingReq: -1
+    // 最近一次下发失败原因（工人可见；下次下发时清空）
+    property string lastError: ""
+
+    // key → PtestPeripheralTest 参数。语义与设备端 peripheral_executors 对齐：
+    // 指示灯 P1 颜色 0红/1蓝/2双色、P2 闪烁周期ms(0=常亮)；白光 P1 亮度；
+    // 喇叭 P2 次数（P1 音量固定出厂默认）；复位键=查询等待按键事件。
+    readonly property var actionMap: ({
+        led_red:   { item: 0, op: 1, p1: 0,   p2: 0 },
+        led_blue:  { item: 0, op: 1, p1: 1,   p2: 0 },
+        led_blink: { item: 0, op: 1, p1: 2,   p2: 500 },
+        white:     { item: 2, op: 1, p1: 100, p2: 0 },
+        speaker:   { item: 7, op: 4, p1: 0,   p2: 1 },
+        mic:       { item: 8, op: 1, p1: 0,   p2: 0 },
+        gimbal:    { item: 6, op: 4, p1: 0,   p2: 0 },
+        reset_key: { item: 4, op: 0, p1: 0,   p2: 0 }
+    })
 
     function dispatch(key) {
+        const a = actionMap[key];
+        lastError = "";
         pendingKey = key;
-        dispatchTimer.key = key;
-        dispatchTimer.restart();
+        pendingReq = CloudClient.peripheralTest(a.item, a.op, a.p1, a.p2, "");
     }
 
-    Timer {
-        id: dispatchTimer
-        property string key: ""
-        interval: 900          // demo：模拟 PC→云端→设备 的往返
-        onTriggered: {
-            var d = {};
-            for (var k in panel.dispatched) d[k] = panel.dispatched[k];
-            d[key] = true;
-            panel.dispatched = d;
+    Connections {
+        target: CloudClient
+        function onCommandFinished(requestId, command, item, code, detail) {
+            if (requestId !== panel.pendingReq) return;   // 不是本面板的指令
+            const key = panel.pendingKey;
+            panel.pendingReq = -1;
             panel.pendingKey = "";
+            if (code === 0) {
+                var d = {};
+                for (var k in panel.dispatched) d[k] = panel.dispatched[k];
+                d[key] = true;
+                panel.dispatched = d;
+            } else {
+                // 设备没做出动作，现象无从判定 → 不开判定按钮，报原因供重试
+                panel.lastError = "下发未执行  Code=" + code
+                                  + (detail.length > 0 ? "  " + detail : "");
+            }
+        }
+        function onCommandTimeout(requestId) {
+            if (requestId !== panel.pendingReq) return;
+            panel.pendingReq = -1;
+            panel.pendingKey = "";
+            panel.lastError = "等待设备上报超时，可重试";
+        }
+        function onCommandFailed(requestId, error) {
+            if (requestId !== panel.pendingReq) return;
+            panel.pendingReq = -1;
+            panel.pendingKey = "";
+            panel.lastError = "通道错误: " + error;
         }
     }
 
@@ -105,6 +142,8 @@ Card {
         verdicts = ({});
         dispatched = ({});
         pendingKey = "";
+        pendingReq = -1;
+        lastError = "";
     }
 
     ConfirmDialog { id: confirm }
@@ -121,6 +160,16 @@ Card {
             color: panel.ready ? Theme.textSecondary : Theme.textDim
             font.family: TypeScale.family
             font.pointSize: TypeScale.body
+            wrapMode: Text.WordWrap
+        }
+
+        Text {
+            Layout.fillWidth: true
+            visible: panel.lastError.length > 0
+            text: panel.lastError
+            color: Theme.fail
+            font.family: TypeScale.family
+            font.pointSize: TypeScale.caption
             wrapMode: Text.WordWrap
         }
 
@@ -181,10 +230,10 @@ Card {
                     text: sending ? "下发中…" : (done ? "重测" : "测试")
                     glyph: sending ? Icons.reset : modelData.glyph
                     kind: done ? "normal" : "primary"
-                    enabled: panel.ready && !sending
+                    // 一次只允许一条在途:pendingReq 是单槽,并发会错配结果
+                    enabled: panel.ready && panel.pendingKey.length === 0
                     implicitHeight: Theme.hit - 8
                     Layout.preferredWidth: 96
-                    // 真实实现:按 key 映射到 PtestPeripheralTest 的 Item/Op 下发
                     onClicked: panel.dispatch(modelData.key)
                 }
 

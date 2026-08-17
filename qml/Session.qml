@@ -36,4 +36,59 @@ QtObject {
         if (isTech) return "技术员";
         return "";
     }
+
+    // ---- 批次(InputData1)会话存储:批次文件页导入,成品工位消费 ----
+    // records: 每台一行(12 列字符串数组,列序见批次文件页 headers);
+    // used:    0/1 入库标记 —— 成品校验通过置 1,防同一条身份写进两台设备;
+    // imei:    采集到的 IMEI(""=未测或校验失败留空白),导出 InputData2 时为末列。
+    // 只在内存:重开软件需重新导入;对账以导出的 InputData2 为准。
+    property string batchName: ""
+    property var batchRecords: []
+    property var batchUsed: []
+    property var batchImei: []
+
+    readonly property int batchDoneCount: {
+        var n = 0;
+        for (var i = 0; i < batchUsed.length; ++i) if (batchUsed[i] === 1) n++;
+        return n;
+    }
+
+    // 切产品=换会话,批次一起清 —— 跨产品复用批次必然写错身份
+    onProfileChanged: { batchName = ""; batchRecords = []; batchUsed = []; batchImei = []; }
+
+    function setBatch(name, records) {
+        batchName = name;
+        batchRecords = records;
+        var u = [], m = [];
+        for (var i = 0; i < records.length; ++i) { u.push(0); m.push(""); }
+        batchUsed = u;
+        batchImei = m;
+    }
+
+    // MAC 归一化:去分隔符并大写 —— 工人可能带冒号输入,批次文件里是纯 hex
+    function normalizeMac(mac) {
+        return ("" + mac).replace(/[:\-\s]/g, "").toUpperCase();
+    }
+
+    function batchIndexOfMac(mac) {
+        const norm = normalizeMac(mac);
+        if (norm.length === 0) return -1;
+        for (var i = 0; i < batchRecords.length; ++i)
+            if (normalizeMac(batchRecords[i][0]) === norm) return i;
+        return -1;
+    }
+
+    // 第一条未入库记录的 MAC —— 成品工位默认带出,入库后自动跳下一条
+    function nextUnusedMac() {
+        for (var i = 0; i < batchRecords.length; ++i)
+            if (batchUsed[i] !== 1) return batchRecords[i][0];
+        return "";
+    }
+
+    // 校验通过才调;失败的记录 IMEI 留空白且不置标记(设备转维修后该条仍可用)
+    function markBatchDone(index, imei) {
+        if (index < 0 || index >= batchRecords.length) return;
+        var u = batchUsed.slice(); u[index] = 1; batchUsed = u;
+        var m = batchImei.slice(); m[index] = imei; batchImei = m;
+    }
 }

@@ -33,12 +33,11 @@ Item {
     property string parseNote: ""     // 解析异常提示（列数不齐等）
     property string exportNote: ""
 
-    // demo：假设批次里前 N 台已完成产测并读到 IMEI。真实实现里这张表来自
-    // 产测台账（按 SN/UUID 关联），不是这么算出来的。
-    readonly property int testedCount: Math.min(3, rows.length)
+    // 已入库台数与每台 IMEI 来自会话批次存储 —— 成品工位校验通过后写入
+    //（Session.markBatchDone）;校验失败/未测的留空白。
+    readonly property int testedCount: Session.batchDoneCount
     function imeiFor(rowIndex) {
-        if (rowIndex >= testedCount) return "";
-        return "86772605123" + (4560 + rowIndex);
+        return rowIndex < Session.batchImei.length ? Session.batchImei[rowIndex] : "";
     }
 
     function parseText(text) {
@@ -60,6 +59,8 @@ Item {
             ? "⚠ 各行列数不一致（出现 " + kinds.join(" / ") + " 列），请检查文件是否被编辑器改动过"
             : "";
         exportNote = "";
+        // 批次入会话:成品工位据此做 MAC 检索/入库标记/IMEI 回填
+        Session.setBatch(srcName, out);
     }
 
     // 开发/演示用:--sample 启动即加载安装目录下的样例文件,
@@ -308,8 +309,8 @@ Item {
                     text: root.exportNote.length > 0 ? root.exportNote
                           : (root.rows.length === 0
                              ? "先导入 InputData1"
-                             : "本批 " + root.rows.length + " 台，已读到 IMEI "
-                               + root.testedCount + " 台（demo 值）；未测到的 IMEI 列留空")
+                             : "本批 " + root.rows.length + " 台，已入库 "
+                               + root.testedCount + " 台；未入库/校验失败的 IMEI 列留空")
                     color: root.exportNote.indexOf("⚠") === 0 ? Theme.warn
                            : (root.exportNote.length > 0 ? Theme.pass : Theme.textDim)
                     font.family: TypeScale.family

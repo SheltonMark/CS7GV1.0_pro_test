@@ -26,12 +26,14 @@ Rectangle {
         }
         out.push({ key: "批次文件", sub: "导入/导出", icon: Icons.save, pending: false });
         out.push({ key: "关于", sub: "版本", icon: Icons.navAbout, pending: false });
+        out.push({ key: "云调试", sub: "链路", icon: Icons.cloud, pending: false });
         return out;
     }
 
-    // 非工位页索引:批次文件、关于依次排在工位之后
+    // 非工位页索引:批次文件、关于、云调试依次排在工位之后
     readonly property int batchIndex: stations.length
     readonly property int aboutIndex: stations.length + 1
+    readonly property int debugIndex: stations.length + 2
 
     // 坑 2:单例属性初始化不能调自定义函数 —— 此处 rail 是普通组件不是单例，
     // 且 entries 是绑定表达式而非单例属性初始化，安全。
@@ -316,6 +318,47 @@ Rectangle {
                     text: "关于"
                     color: aboutCell.active ? Theme.textPrimary
                            : (abHover.hovered ? Theme.textSecondary : Theme.textDim)
+                    font.family: TypeScale.family
+                    font.pointSize: TypeScale.caption
+                    anchors.horizontalCenter: parent.horizontalCenter
+                }
+            }
+        }
+
+        // 云链路调试页(联调用)。与批次文件/关于同为非工位页,放底部区。
+        Item {
+            id: debugCell
+            width: parent.width
+            height: 50
+
+            readonly property bool active: rail.currentIndex === rail.debugIndex
+
+            Rectangle {
+                anchors.fill: parent
+                anchors.leftMargin: Theme.s2
+                anchors.rightMargin: Theme.s2
+                radius: Theme.radius
+                color: debugCell.active ? Theme.brandWash
+                       : (dbgHover.hovered ? Qt.rgba(1, 1, 1, 0.05) : "transparent")
+                Behavior on color { ColorAnimation { duration: Theme.durFast } }
+            }
+            HoverHandler { id: dbgHover }
+            TapHandler { onTapped: rail.currentIndex = rail.debugIndex }
+
+            Column {
+                anchors.centerIn: parent
+                spacing: 2
+                Icon {
+                    text: Icons.cloud
+                    size: 16
+                    color: debugCell.active ? Theme.brand
+                           : (dbgHover.hovered ? Theme.textSecondary : Theme.textDim)
+                    anchors.horizontalCenter: parent.horizontalCenter
+                }
+                Text {
+                    text: "云调试"
+                    color: debugCell.active ? Theme.textPrimary
+                           : (dbgHover.hovered ? Theme.textSecondary : Theme.textDim)
                     font.family: TypeScale.family
                     font.pointSize: TypeScale.caption
                     anchors.horizontalCenter: parent.horizontalCenter

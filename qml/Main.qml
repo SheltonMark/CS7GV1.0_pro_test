@@ -176,6 +176,15 @@ ApplicationWindow {
             Behavior on opacity { NumberAnimation { duration: Theme.durSlow } }
         }
 
+        // 云链路调试(联调用):Mock/真连切换、逐条下发产测指令、盯上报闭环。
+        // 与设备在线状态无关,型号不符也不禁用 —— 它就是用来排链路问题的。
+        ViewCloudDebug {
+            anchors.fill: parent
+            visible: stack.index === stack.stations.length + 2
+            opacity: visible ? 1 : 0
+            Behavior on opacity { NumberAnimation { duration: Theme.durSlow } }
+        }
+
         Component { id: focusPage;    ViewFocus {} }
         Component { id: semiPage;     ViewFinished { semi: true } }
         Component { id: finishedPage; ViewFinished {} }
