@@ -14,6 +14,17 @@ Item {
         Qt.openUrlExternally("wxwork://message?username=" + id);
     }
 
+    // 复制到剪贴板。QML 没有剪贴板 API，标准做法是借隐藏 TextEdit 的 copy()。
+    // ⚠️ 隐藏 TextEdit 的 id 不能叫 "clip"：clip 是 Item 自带属性，Repeater
+    //    委托里未限定的 "clip" 会先命中按钮自身的 clip(bool) 而非外层 id，
+    //    selectAll() 抛 TypeError 且 WIN32 无控制台看不到报错，
+    //    表现就是"点了没反应"。委托里只调这个函数，不直接摸 TextEdit。
+    function copyText(t) {
+        copyHelper.text = t;
+        copyHelper.selectAll();
+        copyHelper.copy();
+    }
+
     ScrollView {
         anchors.fill: parent
         contentWidth: availableWidth
@@ -251,9 +262,7 @@ Item {
                                 glyph: Icons.copy
                                 implicitHeight: Theme.hit - 6
                                 onClicked: {
-                                    clip.text = modelData.wecom;
-                                    clip.selectAll();
-                                    clip.copy();
+                                    root.copyText(modelData.wecom);
                                     copied.owner = modelData.wecom;
                                 }
                             }
@@ -284,10 +293,9 @@ Item {
         }
     }
 
-    // 复制用的隐藏文本框。QML 没有直接的剪贴板 API，
-    // 标准做法是借 TextEdit 的 copy()。
+    // 复制用的隐藏文本框（仅 copyText() 使用，id 不能叫 clip，见上）。
     TextEdit {
-        id: clip
+        id: copyHelper
         visible: false
     }
 }
