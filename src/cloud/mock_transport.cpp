@@ -18,18 +18,19 @@ constexpr int kReadDelayMs = 120;
 MockTransport::MockTransport(QObject *parent)
     : QObject(parent)
 {
-    // SupportedItems=1765（0x6E5）：指示灯(0)/白光(2)/电池(5)/云台(6)/喇叭(7)/
-    // 4G(9)/SD卡(10)。红外灯 bit1 是设备端误注册（CS7G 无此硬件）待摘，不算。
+    // SupportedItems=1781（0x6F5）：指示灯(0)/白光(2)/复位按键(4)/电池(5)/
+    // 云台(6)/喇叭(7)/4G(9)/SD卡(10)。红外灯 bit1 是设备端误注册（CS7G 无此
+    // 硬件）待摘，不算。
     //
-    // 云台(6) 计入是刻意的（用户定稿 2026-08-18）：本产品没有电机，设备端先注册
-    // 桩执行体**恒回成功**，等硬件到位再换真实执行体。所以能力位要报"支持"——
-    // 否则 PC 侧按「设备缺能力」判废，整条流程卡在一个已知没有的硬件上。
-    // ⚠️ 这条依赖设备端(battery_ipc)同步注册 item 6 的桩执行体，两边必须一致。
+    // 云台(6)：本产品无电机，设备端注册桩执行体**恒回成功**（用户定稿
+    // 2026-08-18）——否则 PC 按「设备缺能力」判废，流程卡在已知没有的硬件上。
+    // 复位按键(4)：下发布防 → 工人按住 3 秒 → 设备上报按键事件 → PC 按 Code
+    // 自动判（用户定稿 2026-08-18）。设备端 libsys 按加密分区"成品标志位"分流：
+    // 未置位（产测中）按 3 秒只上报不复位；已置位走原复位流程 —— 产测里按键
+    // 不会真把设备复位掉。咪头(8) 不计入且无需计入：不发指令（喊话→拉流回传→
+    // PC 听），不查此位（见 SequentialTestPanel 的 noCommand 分支）。
     //
-    // 复位按键(4) 与 咪头(8) 不计入且无需计入：两项已定走"无指令纯人工"
-    //（复位只验按键手感、不验触发的功能；咪头靠拉流听声），PC 不下发指令，
-    // 也就不查这两位（见 SequentialTestPanel.startCurrent 的 noCommand 分支）。
-    //
+    // ⚠️ 云台桩 + 复位检测两条都依赖设备端(battery_ipc)同步实现，两端必须一致。
     // 此前的 2037 把 4/6/8 全置 1，恰好掩盖了 Mock 与真机的差异（核对报告断点②）。
     info_ = QJsonObject{
         {QStringLiteral("Active"), 1},
@@ -38,7 +39,7 @@ MockTransport::MockTransport(QObject *parent)
         {QStringLiteral("SemiTime"), QString()},
         {QStringLiteral("FinishTime"), QString()},
         {QStringLiteral("InspectTime"), QString()},
-        {QStringLiteral("SupportedItems"), 1765},
+        {QStringLiteral("SupportedItems"), 1781},
         {QStringLiteral("Sn"), QString()},
         {QStringLiteral("Mac"), QString()},
         {QStringLiteral("Uuid"), QString()},
@@ -162,6 +163,15 @@ void MockTransport::execute(const QString &actionId, const QJsonObject &p)
         const int item = p.value(QStringLiteral("Item")).toInt();
         if (item == 1 || item == 3) {  // CS7G 无红外灯/日夜切换 → 能力集语义回 4
             setResult(requestId, 2, item, 4, QStringLiteral("not supported on CS7G"));
+            return;
+        }
+        // 复位按键:模拟"工人按住 3 秒"——布防后再等 2.8s 才出结果,让 running
+        // 相位的动作提示真的展示一段(节奏与真机同构,总耗时 ≈ 3.5s)。
+        if (item == 4) {
+            QTimer::singleShot(2800, this, [this, requestId]() {
+                setResult(requestId, 2, 4, 0,
+                          QStringLiteral("key held 3s, event reported (mock)"));
+            });
             return;
         }
         QString detail;

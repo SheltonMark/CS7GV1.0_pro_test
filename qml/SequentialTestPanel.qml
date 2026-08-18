@@ -13,7 +13,11 @@ import QtQuick.Layouts
 FocusScope {
     id: panel
 
-    // 队列条目:{ kind:"auto"|"manual", item, key?, name, sub, op, p1, p2, miss, noCommand? }
+    // 队列条目:{ kind:"auto"|"manual", item, key?, name, sub, op, p1, p2, miss,
+    //            noCommand?, deviceJudged?, runningText? }
+    // 两个特例(都在 manualChecks 声明):noCommand 项(咪头)不下发直接出判定页;
+    // deviceJudged 项(复位按键)下发布防后等设备检测(工人按键),按 Code 自动判,
+    // 不出判定页 —— running 相位的提示文案换成 runningText(动作指引)。
     property var queue: []
 
     property int cursor: 0
@@ -113,9 +117,11 @@ FocusScope {
 
     function afterShown() {
         const failed = currentResult !== undefined && currentResult.status === "fail";
-        // 自动项失败停留(设备问题要现场处理:重测/跳过/换项);
+        // 自动项失败停留(设备问题要现场处理:重测/跳过/换项);设备判定项同理——
+        // 超时多半是"窗口内没按到",停留让工人空格重按,不是终局。
         // 人工判异常已是工人的终局结论,记录后照常前进(2026-08-17 简化流)。
-        if (failed && current !== null && current.kind === "auto") {
+        if (failed && current !== null
+                && (current.kind === "auto" || current.deviceJudged === true)) {
             phase = "item";
             return;
         }
@@ -155,7 +161,8 @@ FocusScope {
             if (requestId !== panel.pendingReq) return;
             panel.pendingReq = -1;
             if (panel.current === null) return;
-            if (panel.current.kind === "auto") {
+            // deviceJudged(复位按键):人按键、设备检测,结果与自动项同口径按 Code 判
+            if (panel.current.kind === "auto" || panel.current.deviceJudged === true) {
                 if (code === 0)
                     panel.record("pass", detail.length > 0 ? detail : "");
                 else if (code === 4)
@@ -174,7 +181,11 @@ FocusScope {
         function onCommandTimeout(requestId) {
             if (requestId !== panel.pendingReq) return;
             panel.pendingReq = -1;
-            panel.record("fail", "等待设备上报超时");
+            // 设备判定项的超时含义不同:窗口期外一律判失败(定稿口径),
+            // 大概率是没按/没按够,提示往"重按"引导而不是往"链路断"引导。
+            panel.record("fail", panel.current !== null && panel.current.deviceJudged === true
+                                 ? "窗口期内未检测到按键（空格重测）"
+                                 : "等待设备上报超时");
         }
         function onCommandFailed(requestId, error) {
             if (requestId !== panel.pendingReq) return;
@@ -496,7 +507,12 @@ FocusScope {
                             anchors.horizontalCenter: parent.horizontalCenter
                         }
                         Text {
-                            text: "指令执行中，等待设备…"
+                            // deviceJudged 项在 running 相位等的是**工人的动作**,
+                            // 不是设备闷头执行 —— 文案必须是动作指引
+                            text: panel.current !== null && panel.current.runningText !== undefined
+                                  && panel.current.runningText.length > 0
+                                  ? panel.current.runningText
+                                  : "指令执行中，等待设备…"
                             color: Theme.textSecondary
                             font.family: TypeScale.family
                             font.pointSize: TypeScale.heading

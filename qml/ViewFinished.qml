@@ -65,6 +65,10 @@ Item {
                                                               : FactoryConfig.speakerRepeat)
                                      : c.p2,
                      noCommand: c.noCommand === true,
+                     // 人动作+设备判(复位按键):照常下发与查能力位,只是结果
+                     // 按 Code 自动判、running 相位换成动作提示
+                     deviceJudged: c.deviceJudged === true,
+                     runningText: c.runningText !== undefined ? c.runningText : "",
                      // 无指令项不查能力位:不下发就无所谓设备有没有执行体,
                      // 否则咪头 bit8 不在 SupportedItems 会被误判"设备缺能力"
                      miss: c.noCommand === true
@@ -466,6 +470,9 @@ Item {
 
             // 拉流小窗:这两个工位不调焦,但要确认"画面确实出来了"
             //(摄像头虚焊/排线松最容易在这暴露)。双击全屏,Esc 退回。
+            // ⚠️ 尚未接流(sourceUrl 空着是有意的):CS7G 装壳后无网口,网线只有
+            // 调焦工位能接,这里的画面与咪头回传声音都要走 XP2P,SDK 到位后在此
+            // 绑 sourceUrl(PC 侧音频通路已就绪,见 LivePreview 的 audioOutput)。
             Card {
                 id: liveCard
                 title: "实时画面"
