@@ -18,11 +18,19 @@ constexpr int kReadDelayMs = 120;
 MockTransport::MockTransport(QObject *parent)
     : QObject(parent)
 {
-    // SupportedItems=1701（0x6A5）：真机将注册的执行体 —— 指示灯(0)/白光(2)/
-    // 电池(5)/喇叭(7)/4G(9)/SD卡(10) 六项。红外灯 bit1 是设备端误注册
-    //（CS7G 无此硬件）待摘，不算；复位(4)/云台(6)/咪头(8) 无执行体：咪头已定
-    // 走"无指令纯人工"不查此位，复位/云台会按「设备缺能力」判——与真机一致。
-    // 此前的 2037 把 4/6/8 都置 1，恰好掩盖了 Mock 与真机的差异（核对报告断点②）。
+    // SupportedItems=1765（0x6E5）：指示灯(0)/白光(2)/电池(5)/云台(6)/喇叭(7)/
+    // 4G(9)/SD卡(10)。红外灯 bit1 是设备端误注册（CS7G 无此硬件）待摘，不算。
+    //
+    // 云台(6) 计入是刻意的（用户定稿 2026-08-18）：本产品没有电机，设备端先注册
+    // 桩执行体**恒回成功**，等硬件到位再换真实执行体。所以能力位要报"支持"——
+    // 否则 PC 侧按「设备缺能力」判废，整条流程卡在一个已知没有的硬件上。
+    // ⚠️ 这条依赖设备端(battery_ipc)同步注册 item 6 的桩执行体，两边必须一致。
+    //
+    // 复位按键(4) 与 咪头(8) 不计入且无需计入：两项已定走"无指令纯人工"
+    //（复位只验按键手感、不验触发的功能；咪头靠拉流听声），PC 不下发指令，
+    // 也就不查这两位（见 SequentialTestPanel.startCurrent 的 noCommand 分支）。
+    //
+    // 此前的 2037 把 4/6/8 全置 1，恰好掩盖了 Mock 与真机的差异（核对报告断点②）。
     info_ = QJsonObject{
         {QStringLiteral("Active"), 1},
         {QStringLiteral("Stage"), 0},
@@ -30,7 +38,7 @@ MockTransport::MockTransport(QObject *parent)
         {QStringLiteral("SemiTime"), QString()},
         {QStringLiteral("FinishTime"), QString()},
         {QStringLiteral("InspectTime"), QString()},
-        {QStringLiteral("SupportedItems"), 1701},
+        {QStringLiteral("SupportedItems"), 1765},
         {QStringLiteral("Sn"), QString()},
         {QStringLiteral("Mac"), QString()},
         {QStringLiteral("Uuid"), QString()},
@@ -159,6 +167,9 @@ void MockTransport::execute(const QString &actionId, const QJsonObject &p)
         QString detail;
         switch (item) {
         case 5:  detail = QStringLiteral("voltage=3868mV"); break;
+        // 云台：桩执行体恒回成功（本产品无电机）。detail 写明白，免得日后
+        // 在指令流水里看到"云台通过"以为真转过了。
+        case 6:  detail = QStringLiteral("stub: no gimbal motor, always ok"); break;
         case 9:  detail = QStringLiteral("sim0 rsrp=-92dBm"); break;
         case 10: detail = QStringLiteral("total=30436MB free=30120MB"); break;
         default: break;
