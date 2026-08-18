@@ -99,6 +99,9 @@ Item {
         spacing: Theme.s4
 
         // ---- 左列：链路状态 + 指令面板 + 产测信息 ----
+        // ⚠️ 必须保持可伸缩：指令卡片最宽那行(读产测信息/清配置/关机120s +
+        // 清标识/全清)要 ~620px，钉死在 preferredWidth 上会把按钮裁到卡片外。
+        // 两列的宽度分配靠右列的 preferredWidth 定(见下)，不要在这里关 fillWidth。
         ColumnLayout {
             Layout.preferredWidth: 460
             Layout.fillHeight: true
@@ -339,13 +342,17 @@ Item {
                 Layout.fillHeight: true
 
                 ScrollView {
+                    id: infoScroll
                     anchors.fill: parent
                     clip: true
                     TextArea {
                         id: infoText
+                        // 必须钉宽度,否则 TextArea 按内容取隐式宽 ⇒ 长行(日志尾部
+                        // 那种无空格长串)永远不换行,只把自己横向拉出可视区。
+                        width: infoScroll.availableWidth
                         readOnly: true
                         text: "（点「读产测信息」拉取）"
-                        wrapMode: TextArea.Wrap
+                        wrapMode: TextArea.WrapAnywhere
                         background: null
                         color: Theme.textSecondary
                         font.family: "Consolas"
@@ -356,8 +363,13 @@ Item {
         }
 
         // ---- 右列：指令流水 + 阶段4 设备侧诊断 ----
+        // ⚠️ preferredWidth 必须显式给：Card 的 implicitWidth 恒为 0（内容挂在
+        // anchors 里，不往上传尺寸），所以本列若不写期望宽就等于"我不要地方"，
+        // 实测会被压到十几像素、只剩竖排的标签字。给了之后两列约 845 / 912。
         ColumnLayout {
             Layout.fillWidth: true
+            Layout.preferredWidth: 560
+            Layout.minimumWidth: 420
             Layout.fillHeight: true
             spacing: Theme.s4
 
@@ -414,11 +426,31 @@ Item {
                         label: "时间"
                         value: root.lastErrorTimeText()
                     }
-                    FieldRow {
+                    // 详情不用 FieldRow —— 它按 SN/IMEI 那类定长值设计会 elide,
+                    // 而 Detail 最长 128 字符，截断了正好丢掉排障要看的那半句。
+                    RowLayout {
                         Layout.fillWidth: true
-                        label: "详情"
-                        value: root.lastError !== null && root.lastError.Detail !== undefined
-                               ? String(root.lastError.Detail) : ""
+                        spacing: Theme.s3
+                        Text {
+                            text: "详情"
+                            color: Theme.textSecondary
+                            font.family: TypeScale.family
+                            font.pointSize: TypeScale.body
+                            Layout.preferredWidth: 92      // 与 FieldRow 的标签同宽
+                            Layout.alignment: Qt.AlignTop
+                        }
+                        Text {
+                            Layout.fillWidth: true
+                            readonly property string detail:
+                                root.lastError !== null && root.lastError.Detail !== undefined
+                                ? String(root.lastError.Detail) : ""
+                            text: detail.length > 0 ? detail : "—"
+                            color: detail.length > 0 ? Theme.textPrimary : Theme.textDim
+                            font.family: "Consolas"
+                            font.pointSize: TypeScale.body
+                            font.weight: TypeScale.weightMedium
+                            wrapMode: Text.WrapAnywhere
+                        }
                     }
                 }
             }
@@ -431,9 +463,11 @@ Item {
                 Layout.preferredHeight: 240
 
                 ScrollView {
+                    id: tailScroll
                     anchors.fill: parent
                     clip: true
                     TextArea {
+                        width: tailScroll.availableWidth   // 同上:不钉宽度长行不换行
                         readOnly: true
                         // 内容 = root.logTailText，仅 Seq 变化时被 onInfoUpdated 更新
                         text: root.logTailText.length > 0 ? root.logTailText
