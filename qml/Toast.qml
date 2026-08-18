@@ -22,10 +22,19 @@ Rectangle {
     width: row.implicitWidth + Theme.s5 * 2
     height: 46
     radius: 23
-    color: root.ok ? Qt.rgba(0.133, 0.773, 0.369, 0.16)
-                   : Qt.rgba(0.937, 0.267, 0.267, 0.16)
+    // ⚠️ 必须不透底。曾用 16% 透明色当底:悬浮位置正压着底部的
+    // "流程失败: …"红字,两层文字透叠完全读不清(实测)。
+    // 做法同逐项测试的结果气泡:实底 + 低透明度色调罩。
+    color: Theme.bgDeep
     border.width: 1
     border.color: root.ok ? Theme.pass : Theme.fail
+
+    Rectangle {
+        anchors.fill: parent
+        radius: parent.radius
+        color: root.ok ? Qt.rgba(0.133, 0.773, 0.369, 0.16)
+                       : Qt.rgba(0.937, 0.267, 0.267, 0.16)
+    }
 
     opacity: 0
     visible: opacity > 0
