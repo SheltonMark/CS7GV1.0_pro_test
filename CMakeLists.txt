@@ -5,7 +5,7 @@ cmake_minimum_required(VERSION 3.21)
 #
 # 版本号是产线工具的硬要求：界面要看得到，将来每条产测记录也要带上它，
 # 否则批量误判无法追溯是哪个版本干的。此处是唯一来源。
-project(ptest_pc_client VERSION 0.1.6 LANGUAGES CXX)
+project(ptest_pc_client VERSION 0.1.7 LANGUAGES CXX)
 
 find_package(Qt6 6.7 REQUIRED COMPONENTS Quick QuickControls2 Network Multimedia)
 

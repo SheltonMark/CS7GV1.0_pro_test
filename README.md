@@ -2,8 +2,11 @@
 
 CS7G 系列低功耗电池 IPC 产线产测软件。Qt 6.8 + C++ + QML（FluentWinUI3 深色主题）。
 
-**当前状态：只有 UI 外观，无业务逻辑。** 数据全部来自 `qml/MockData.qml`；协议
-（腾达后台 HTTPS + 签名）、XP2P 拉流、Excel、SQLite、流程引擎都还没接。
+**当前状态：UI 完整，业务链路半接。** 已接：腾讯云 API 链路（TC3 签名，指令
+闭环/批次联动/等待态，另有 mock 传输层可离线跑）、心跳在线判定与诊断链路、
+调焦工位 UDP 广播搜设备 + RTSP 直拉（对齐 CP3 老协议）、检查/维修工位接云、
+测试项勾选持久化（factory_config.json）。未接：XP2P 拉流（SDK 待要）、
+Excel 导出、SQLite 台账。产品 profile 等静态数据仍在 `qml/MockData.qml`。
 协议契约见固件仓库 `battery_ipc/docs/product_test/产测物模型字段评审表.md`。
 
 ## 构建
@@ -12,13 +15,17 @@ CS7G 系列低功耗电池 IPC 产线产测软件。Qt 6.8 + C++ + QML（FluentW
 sh build.sh
 ```
 
-产物 = **`dist/` 整个文件夹**（~83 MB / 1106 文件），拷到任何 Win10/Win11 机器双击
-`ProductTestTool.exe` 即可，不需要装 Qt。发给别人用 zip（压后 ~31 MB）：
+产物 = **`dist/` 整个文件夹**（~112 MB / 1182 文件），拷到任何 Win10/Win11 机器双击
+`ProductTestTool.exe` 即可，不需要装 Qt。发布 = dist **内容**直压 zip（无顶层
+文件夹，压后 ~43 MB），放 `package/`（已 gitignore，zip 不进仓库）：
 
 ```bash
-cd dist && tar -a -c -f ../ProductTestTool_vX.Y.Z_日期.zip *
+cd dist && tar -a -c -f ../package/ProductTestTool_vX.Y.Z_日期.zip *
 ```
 
+版本号唯一来源 = CMakeLists `project(VERSION)`（exe 版本资源/标题栏/关于页同源），
+zip 名里的版本必须与其一致，日期用打包当天；改过版本号要先重跑 `build.sh` 再压。
+⚠️ 压包前先关掉运行中的 exe —— DLL 被占用会让压缩失败。
 exe 本身只有 ~0.4 MB，其余全是 Qt 运行库 —— **单独拷 exe 跑不起来**。
 
 ### 环境（一次性）
@@ -55,9 +62,11 @@ python -m aqt install-tool windows desktop tools_ninja     -O C:\Qt
 - **每产品一份静态 profile**（真实实现 = 安装目录 `profiles/<产品>.json`，管理员随
   软件发布维护，普通工人不可编辑）：productId、显示名、固定测试项集合、
   后续可扩展工装卡模板。mock 里对应 `MockData.profiles`。
-- 测试项两层收敛（无工人勾选层）：**实际下发 = profile 固定项 ∩ 设备
-  SupportedItems**；profile 要求而设备未上报 → 标红「设备未上报能力，检查接线」
-  并计不通过，**不静默跳过**；设备上报而 profile 不含 → 不下发。
+- 测试项三层收敛：**实际下发 = 工厂勾选 ∩ profile 固定项 ∩ 设备
+  SupportedItems**（勾选入口 = 产品门卡片「测试项」按钮，管理员可见，存
+  factory_config.json，产线也可直接改文件）；profile 要求而设备未上报 →
+  标红「设备未上报能力，检查接线」并计不通过，**不静默跳过**；设备上报而
+  profile 不含 → 不下发。
 - **设备准入**：上线先核对设备上报 ProductId 与会话产品，不符 → 顶栏红警
   「设备型号与当前产品不符」+ 全部工位页禁用（关于页保留）。
 - **整机产测通过的最终判据 = 四阶段时间戳齐全**（FocusTime/SemiTime/FinishTime/
@@ -103,6 +112,12 @@ python -m aqt install-tool windows desktop tools_ninja     -O C:\Qt
     要手工删目录；A: 盘的删除还不会立即落地，得等一拍）。`build.sh` 已在编译前
     加占用检查提前 fail —— 判据是"能否以写方式打开 exe"，不按进程名查
     （MSYS 会把 `tasklist //FI` 的参数当路径处理）。
+14. **深色不能靠跟随系统主题** —— FluentWinUI3 的 `Dialog` 在 Light 主题下
+    背景**写死 white**（样式源码如此，钉 palette 拦不住），Win10 机器普遍被
+    解析成 Light，弹窗全白底（实测：测试项配置弹窗 Win10 白 / Win11 深色黑）。
+    `main.cpp` 已 `styleHints()->setColorScheme(Qt::ColorScheme::Dark)` 强制
+    深色，所有机器走同一分支；新写弹窗不用逐个钉背景，但按钮仍必须走
+    `AppButton`（坑 8 不因此失效）。
 
 ## 已知待办
 
