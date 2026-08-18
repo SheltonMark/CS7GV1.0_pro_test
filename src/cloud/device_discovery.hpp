@@ -18,8 +18,11 @@
 // 多摄机型搜索字带 &1/&2 后缀选通道 —— 改配置，不改代码。
 //
 // ⚠️ 前提：设备端要有广播应答服务（监听 7320、认搜索字、回 ip;mac）。
-//    老 CP3 固件自带；新 battery_ipc 固件是否已移植待确认 —— 没有则
-//    这里恒搜不到，调焦页只能走手动 IP 兜底。
+//    2026-08-18 已核实 battery_ipc 固件无此服务，需移植。老固件参考实现：
+//    A:\cp3prov1.2\Apps\Kylin\Functions\Ate.cpp（CAte::ThreadProc 收包
+//    strstr 比对 → OnTimer 每秒组 "ip;mac;" → SendBroadcast 广播到 7319）。
+//    注意设备回包结尾多一个分号（"%s;%s;"），MAC 固定取 17 字符正好切掉。
+//    移植完成前列表恒空，调焦页只能走手动 IP 兜底。
 //
 // 非单例：只有调焦页用，随页面实例化，7319 端口仅在搜索期间占用。
 class DeviceDiscovery : public QObject {
