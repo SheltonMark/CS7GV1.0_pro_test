@@ -7,6 +7,7 @@ import QtQuick.Layouts
 //   ① 看当前传输形态（Mock 假设备 / 腾讯云直连，由 cloud_config.json 决定）
 //   ② 逐条下发 6 个产测 action，盯"受理→设备执行→上报"的完整闭环
 //   ③ 随时读 ProductTestInfo 汇总 + 心跳计数/年龄（在线判定的原始依据）
+//   ④ 盯设备端最近异常与日志尾部（阶段4：PC 没下发指令时的失败也看得见）
 // 工位页接真实流程前，所有链路问题先在这页定位——工位页保持 Mock 数据不动。
 Item {
     id: root
@@ -23,6 +24,30 @@ Item {
         running: true
         repeat: true
         onTriggered: root.clockTick++
+    }
+
+    // ---- 阶段4 日志展示（PtestLastError / PtestLogTail，物模型 v3）----
+    // 设备端稍后上报；null = 一次都没收到（旧固件/旧物模型），界面显示"—"。
+    // 收到后粘滞——单拍缺键不清空（设备属性本来就是快照式的，缺=没变不是没了）。
+    property var lastError: null
+    // 日志尾部只认 Seq 变化才刷新：轮询最快 500ms 一拍，每拍重设 text 会闪烁
+    property int logTailSeq: -1
+    property string logTailText: ""
+
+    // Stage 枚举（物模型 v3 PtestLastError.Stage）
+    readonly property var stageNames:
+        ["读工装卡", "启动自检", "上云", "写加密分区", "产测信息校验", "电量门"]
+
+    function lastErrorStageText() {
+        if (lastError === null) return "";
+        const s = Number(lastError.Stage);
+        const name = stageNames[s] !== undefined ? stageNames[s] : ("阶段" + s);
+        return name + "　Code=" + lastError.Code;
+    }
+    function lastErrorTimeText() {
+        if (lastError === null || lastError.Ts === undefined) return "";
+        return Qt.formatDateTime(new Date(Number(lastError.Ts) * 1000),
+                                 "yyyy-MM-dd hh:mm:ss");
     }
 
     // tick 只为让绑定跟着秒钟重算，函数体不用它。
@@ -56,7 +81,16 @@ Item {
         }
         function onCommandTimeout(requestId) { root.appendLog("        ❌ 等结果超时"); }
         function onCommandFailed(requestId, error) { root.appendLog("        ❌ 通道错误"); }
-        function onInfoUpdated(info) { infoText.text = JSON.stringify(info, null, 2); }
+        function onInfoUpdated(info) {
+            infoText.text = JSON.stringify(info, null, 2);
+            if (info.PtestLastError !== undefined)
+                root.lastError = info.PtestLastError;
+            const tail = info.PtestLogTail;
+            if (tail !== undefined && tail.Seq !== root.logTailSeq) {
+                root.logTailSeq = tail.Seq;
+                root.logTailText = tail.Text !== undefined ? tail.Text : "";
+            }
+        }
     }
 
     RowLayout {
@@ -321,32 +355,95 @@ Item {
             }
         }
 
-        // ---- 右列：指令流水 ----
-        Card {
-            title: "指令流水"
-            titleIcon: Icons.history
+        // ---- 右列：指令流水 + 阶段4 设备侧诊断 ----
+        ColumnLayout {
             Layout.fillWidth: true
             Layout.fillHeight: true
+            spacing: Theme.s4
 
-            ListView {
-                id: logView
-                anchors.fill: parent
-                clip: true
-                spacing: 2
-                model: ListModel { id: logModel }
+            Card {
+                title: "指令流水"
+                titleIcon: Icons.history
+                Layout.fillWidth: true
+                Layout.fillHeight: true
 
-                delegate: Text {
-                    required property string line
-                    width: logView.width
-                    text: line
-                    color: line.indexOf("❌") >= 0 || line.indexOf("✗") >= 0
-                             || line.indexOf("⏱") >= 0 ? Theme.fail
-                           : line.indexOf("✅") >= 0 ? Theme.pass
-                           : line.indexOf("←") >= 0 ? Theme.textPrimary
-                           : Theme.textSecondary
-                    font.family: "Consolas"
-                    font.pointSize: TypeScale.caption
-                    wrapMode: Text.WrapAnywhere
+                ListView {
+                    id: logView
+                    anchors.fill: parent
+                    clip: true
+                    spacing: 2
+                    model: ListModel { id: logModel }
+
+                    delegate: Text {
+                        required property string line
+                        width: logView.width
+                        text: line
+                        color: line.indexOf("❌") >= 0 || line.indexOf("✗") >= 0
+                                 || line.indexOf("⏱") >= 0 ? Theme.fail
+                               : line.indexOf("✅") >= 0 ? Theme.pass
+                               : line.indexOf("←") >= 0 ? Theme.textPrimary
+                               : Theme.textSecondary
+                        font.family: "Consolas"
+                        font.pointSize: TypeScale.caption
+                        wrapMode: Text.WrapAnywhere
+                    }
+                }
+            }
+
+            // 最近一条非指令类失败（起机 provision/自检等，PC 没下发指令时的
+            // 失败此前只在设备 stderr）。没收到属性时三行都显 "—"。
+            Card {
+                title: "最近设备异常 PtestLastError"
+                titleIcon: Icons.fail
+                fitContent: true
+                Layout.fillWidth: true
+
+                ColumnLayout {
+                    anchors { left: parent.left; right: parent.right; top: parent.top }
+                    spacing: Theme.s2
+
+                    FieldRow {
+                        Layout.fillWidth: true
+                        label: "阶段"
+                        mono: false
+                        value: root.lastErrorStageText()
+                        valueColor: Theme.fail
+                    }
+                    FieldRow {
+                        Layout.fillWidth: true
+                        label: "时间"
+                        value: root.lastErrorTimeText()
+                    }
+                    FieldRow {
+                        Layout.fillWidth: true
+                        label: "详情"
+                        value: root.lastError !== null && root.lastError.Detail !== undefined
+                               ? String(root.lastError.Detail) : ""
+                    }
+                }
+            }
+
+            // 设备 ptest.log 尾部原文（管道分隔：时间戳|请求号|指令|测试项|结果码|详情）
+            Card {
+                title: "设备日志尾部 PtestLogTail"
+                titleIcon: Icons.history
+                Layout.fillWidth: true
+                Layout.preferredHeight: 240
+
+                ScrollView {
+                    anchors.fill: parent
+                    clip: true
+                    TextArea {
+                        readOnly: true
+                        // 内容 = root.logTailText，仅 Seq 变化时被 onInfoUpdated 更新
+                        text: root.logTailText.length > 0 ? root.logTailText
+                                                          : "—（设备未上报该属性）"
+                        wrapMode: TextArea.WrapAnywhere
+                        background: null
+                        color: Theme.textSecondary
+                        font.family: "Consolas"
+                        font.pointSize: TypeScale.caption
+                    }
                 }
             }
         }

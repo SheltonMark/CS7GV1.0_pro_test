@@ -2,8 +2,8 @@ import QtQuick
 import ptest
 import QtQuick.Controls
 
-// 产测 PC 客户端。目前只有 UI 外观，数据全来自 MockData.qml。
-// 构建见根目录 README.md
+// 产测 PC 客户端。测试结果来自 CloudClient 信号（Mock/真云由 cloud_config.json
+// 决定），MockData 只提供产品配置（profiles/测试项主表）。构建见根目录 README.md
 ApplicationWindow {
     id: win
     width: 1440

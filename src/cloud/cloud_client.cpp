@@ -23,7 +23,8 @@ qint64 NormalizeEpochMs(const qint64 stamp)
     return stamp < 100000000000LL ? stamp * 1000 : stamp;
 }
 
-// ProductTestInfo + DeviceInformation + PtestHeartbeat 合并成给 QML 的一张表。
+// ProductTestInfo + DeviceInformation + PtestHeartbeat + 阶段4 日志属性
+//（PtestLastError/PtestLogTail）合并成给 QML 的一张表。
 // 带网口产品(CS7G)调焦走 RTSP 直拉,URL 里的 IP 就取自 DeviceInformation 上报；
 // 心跳计数/年龄供调试页与在线诊断直接展示，不必再拆第二条通道。
 QVariantMap InfoMapFromData(const QJsonObject &data,
@@ -52,6 +53,19 @@ QVariantMap InfoMapFromData(const QJsonObject &data,
                     heartbeat.value(QStringLiteral("LastUpdate")));
     if (heartbeatAgeMs >= 0)
         info.insert(QStringLiteral("PtestHeartbeatAgeMs"), heartbeatAgeMs);
+    // 阶段4 日志展示（物模型 v3 新增，设备端稍后上报——现在收不到属正常）：
+    // PtestLastError = 最近一条非指令类失败摘要（起机 provision/自检这类 PC 没
+    // 下发指令时的失败，此前只打设备 stderr，PC 侧完全看不见）；
+    // PtestLogTail = 设备 ptest.log 尾部原文。原样塞对象（toVariantMap 会转成
+    // QML 可读的嵌套 map），缺键不塞占位——QML 按 undefined 显示"—"。
+    const QJsonObject lastError = data.value(QStringLiteral("PtestLastError"))
+                                      .toObject().value(QStringLiteral("Value")).toObject();
+    if (!lastError.isEmpty())
+        info.insert(QStringLiteral("PtestLastError"), lastError);
+    const QJsonObject logTail = data.value(QStringLiteral("PtestLogTail"))
+                                    .toObject().value(QStringLiteral("Value")).toObject();
+    if (!logTail.isEmpty())
+        info.insert(QStringLiteral("PtestLogTail"), logTail);
     return info.toVariantMap();
 }
 
@@ -204,8 +218,10 @@ QString CloudClient::b64Url(const QString &text) const
 
 int CloudClient::writeSuid(const QString &suid)
 {
+    // SUID 落加密分区（整块擦写），与 writeStage/writeIdentity 同一类超时
     return enqueue(QStringLiteral("PtestWriteSuid"),
-                   QJsonObject{{QStringLiteral("Suid"), suid}}, 10000);
+                   QJsonObject{{QStringLiteral("Suid"), suid}},
+                   FactoryConfig::instance()->timeoutFlashMs());
 }
 
 void CloudClient::refreshInfo()

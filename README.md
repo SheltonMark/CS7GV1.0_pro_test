@@ -3,7 +3,8 @@
 CS7G 系列低功耗电池 IPC 产线产测软件。Qt 6.8 + C++ + QML（FluentWinUI3 深色主题）。
 
 **当前状态：UI 完整，业务链路半接。** 已接：腾讯云 API 链路（TC3 签名，指令
-闭环/批次联动/等待态，另有 mock 传输层可离线跑）、心跳在线判定与诊断链路、
+闭环/批次联动/等待态，另有 mock 传输层可离线跑）、心跳在线判定与诊断链路
+（云调试页含设备「最近异常/日志尾部」展示，物模型 v3 属性，设备端稍后上报）、
 调焦工位 UDP 广播搜设备 + RTSP 直拉（对齐 CP3 老协议）、检查/维修工位接云、
 测试项勾选持久化（factory_config.json）。未接：XP2P 拉流（SDK 待要）、
 Excel 导出、SQLite 台账。产品 profile 等静态数据仍在 `qml/MockData.qml`。
@@ -66,7 +67,8 @@ python -m aqt install-tool windows desktop tools_ninja     -O C:\Qt
   SupportedItems**（勾选入口 = 产品门卡片「测试项」按钮，管理员可见，存
   factory_config.json，产线也可直接改文件）；profile 要求而设备未上报 →
   标红「设备未上报能力，检查接线」并计不通过，**不静默跳过**；设备上报而
-  profile 不含 → 不下发。
+  profile 不含 → 不下发。咪头例外：无指令纯人工判定（评审表 §4.5，判定靠
+  拉流听声），不发指令也不查能力位。
 - **设备准入**：上线先核对设备上报 ProductId 与会话产品，不符 → 顶栏红警
   「设备型号与当前产品不符」+ 全部工位页禁用（关于页保留）。
 - **整机产测通过的最终判据 = 四阶段时间戳齐全**（FocusTime/SemiTime/FinishTime/

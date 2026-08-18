@@ -76,7 +76,8 @@ QtObject {
     // 真机当前=0x6A5:指示灯(0)/白光(2)/电池(5)/喇叭(7)/4G(9)/SD(10) 六项已接线。
     // 无 bit1(红外)与 bit3(日夜) —— 本产品无此硬件。
     // "profile 要求而设备未上报→标红缺能力"这条路径不用造假来演示:
-    // 复位按键(4,待 MCU)/云台(6,待电机)/咪头(8,待分贝采集) 天然就是差集。
+    // 复位按键(4,待 MCU)/云台(6,待电机) 天然就是差集。咪头(8)不算——
+    // 已定走"无指令纯人工"(评审表 §4.5),不查能力位,见 manualChecks.noCommand。
     readonly property int supportedItems: 0x6A5
 
     // ---- 人工判定条目全集(8 条) ----
@@ -100,7 +101,9 @@ QtObject {
           label: "满亮度发光", glyph: Icons.whiteLight, op: 1, p1: -1, p2: 0 },
         { key: "speaker",   item: 7, group: "喇叭",     short: "",
           label: "能从设备听到提示音", glyph: Icons.speaker, op: 4, p1: 0, p2: -1 },
-        { key: "mic",       item: 8, group: "咪头",     short: "",
+        // 咪头不发指令(评审表 §4.5):采音链路=设备咪头→RTSP 拉流→PC 喇叭,
+        // 判定靠人耳,设备端无执行体也无需有;op/p1/p2 仅占位。
+        { key: "mic",       item: 8, group: "咪头",     short: "", noCommand: true,
           label: "对着设备说话，能从电脑听到自己的声音", glyph: Icons.mic, op: 1, p1: 0, p2: 0 },
         { key: "gimbal",    item: 6, group: "云台",     short: "",
           label: "上下左右转动到位，无异响、无卡顿", glyph: Icons.gimbal, op: 4, p1: 0, p2: 0 },

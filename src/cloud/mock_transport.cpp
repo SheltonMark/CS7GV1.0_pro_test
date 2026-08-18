@@ -18,8 +18,11 @@ constexpr int kReadDelayMs = 120;
 MockTransport::MockTransport(QObject *parent)
     : QObject(parent)
 {
-    // SupportedItems=2037：CS7G 支持 9 项外设（无红外灯 bit1、无日夜切换 bit3），
-    // 0x7FF - 0x002 - 0x008 = 0x7F5 = 2037，与设备端能力注册表一致。
+    // SupportedItems=1701（0x6A5）：真机将注册的执行体 —— 指示灯(0)/白光(2)/
+    // 电池(5)/喇叭(7)/4G(9)/SD卡(10) 六项。红外灯 bit1 是设备端误注册
+    //（CS7G 无此硬件）待摘，不算；复位(4)/云台(6)/咪头(8) 无执行体：咪头已定
+    // 走"无指令纯人工"不查此位，复位/云台会按「设备缺能力」判——与真机一致。
+    // 此前的 2037 把 4/6/8 都置 1，恰好掩盖了 Mock 与真机的差异（核对报告断点②）。
     info_ = QJsonObject{
         {QStringLiteral("Active"), 1},
         {QStringLiteral("Stage"), 0},
@@ -27,7 +30,7 @@ MockTransport::MockTransport(QObject *parent)
         {QStringLiteral("SemiTime"), QString()},
         {QStringLiteral("FinishTime"), QString()},
         {QStringLiteral("InspectTime"), QString()},
-        {QStringLiteral("SupportedItems"), 2037},
+        {QStringLiteral("SupportedItems"), 1701},
         {QStringLiteral("Sn"), QString()},
         {QStringLiteral("Mac"), QString()},
         {QStringLiteral("Uuid"), QString()},
@@ -39,6 +42,25 @@ MockTransport::MockTransport(QObject *parent)
         {QStringLiteral("SwVersion"), QStringLiteral("mock-0.1.0")},
         {QStringLiteral("HwVersion"), QStringLiteral("demo")},
         {QStringLiteral("SecretCrc32"), QString()},
+    };
+
+    // 阶段4 展示样例：一条「上云阶段失败」的最近异常（Stage=2，Code 走
+    // ProductTestResult.Code 口径的通用失败 1），Ts 固定在启动前 1 小时，
+    // 界面的时间格式化一眼可核。真机语义 = 最近一条非指令类失败，粘滞不清零。
+    lastError_ = QJsonObject{
+        {QStringLiteral("Stage"), 2},
+        {QStringLiteral("Code"), 1},
+        {QStringLiteral("Detail"), QStringLiteral("mqtt connect timeout, retry=3 (mock)")},
+        {QStringLiteral("Ts"), QDateTime::currentSecsSinceEpoch() - 3600},
+    };
+    // ptest.log 尾部样例（管道分隔：时间戳|请求号|指令|测试项|结果码|详情）。
+    // 起机四行打底；之后每执行一条指令 setResult 追加一行、Seq 自增——
+    // 让 QML「仅 Seq 变化才刷新」的逻辑在 Mock 自测里就真的被踩到。
+    logLines_ = QStringList{
+        QStringLiteral("20260818090001123|0|boot|-1|0|provision ok"),
+        QStringLiteral("20260818090003456|0|selfcheck|-1|0|4g ok rsrp=-95dBm"),
+        QStringLiteral("20260818090007789|0|cloud|-1|1|mqtt connect timeout, retry=3"),
+        QStringLiteral("20260818090011024|0|cloud|-1|0|mqtt connected"),
     };
 }
 
@@ -77,6 +99,16 @@ void MockTransport::readDeviceData(const QString & /*productId*/, const QString 
                                        QStringLiteral("192.168.170.66")},
                                       {QStringLiteral("SystemVersion"),
                                        QStringLiteral("mock-sys-1.0")}}},
+                         {QStringLiteral("LastUpdate"), nowMs}}},
+            // 阶段4 日志展示(物模型 v3)：形状与真云一致 {"Value":{...},"LastUpdate":毫秒}
+            {QStringLiteral("PtestLastError"),
+             QJsonObject{{QStringLiteral("Value"), lastError_},
+                         {QStringLiteral("LastUpdate"), nowMs}}},
+            {QStringLiteral("PtestLogTail"),
+             QJsonObject{{QStringLiteral("Value"),
+                          QJsonObject{{QStringLiteral("Seq"), logSeq_},
+                                      {QStringLiteral("Text"),
+                                       logLines_.join(QLatin1Char('\n'))}}},
                          {QStringLiteral("LastUpdate"), nowMs}}},
         };
         if (hasResult_) {
@@ -183,6 +215,15 @@ void MockTransport::setResult(int requestId, int command, int item, int code,
         {QStringLiteral("Ts"), QDateTime::currentSecsSinceEpoch()},
     };
     hasResult_ = true;
+
+    // 日志尾部同步演进：真机每执行一条指令就往 ptest.log 追一行同格式记录。
+    // 封顶 8 行 —— 真机 Text ≤2048，Mock 同样只留尾部。
+    logLines_.append(QStringLiteral("%1|%2|%3|%4|%5|%6")
+                         .arg(nowStamp17()).arg(requestId).arg(command)
+                         .arg(item).arg(code).arg(detail));
+    while (logLines_.size() > 8)
+        logLines_.removeFirst();
+    ++logSeq_;
 }
 
 QString MockTransport::nowStamp17()

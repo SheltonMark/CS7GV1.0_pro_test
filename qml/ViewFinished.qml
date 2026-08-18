@@ -64,7 +64,12 @@ Item {
                      p2: c.p2 === -1 ? (c.key === "led_blink" ? FactoryConfig.ledBlinkMs
                                                               : FactoryConfig.speakerRepeat)
                                      : c.p2,
-                     miss: (supportedItemsLive & (1 << c.item)) === 0 });
+                     noCommand: c.noCommand === true,
+                     // 无指令项不查能力位:不下发就无所谓设备有没有执行体,
+                     // 否则咪头 bit8 不在 SupportedItems 会被误判"设备缺能力"
+                     miss: c.noCommand === true
+                           ? false
+                           : (supportedItemsLive & (1 << c.item)) === 0 });
         });
         return q;
     }

@@ -35,4 +35,8 @@ private:
     QJsonObject result_;
     bool hasResult_ {false};
     int heartbeat_ {0};   // 每次读上报自增，模拟固件 5s 一拍的心跳计数
+    // 阶段4 日志展示假数据（物模型 v3：PtestLastError / PtestLogTail）
+    QJsonObject lastError_;  // 固定一条"上云失败"样例——真机语义=最近一条非指令类失败，粘滞
+    QStringList logLines_;   // ptest.log 尾部；每执行一条指令追加一行
+    int logSeq_ {1};         // Text 每变一次自增——QML 靠它决定要不要刷新文本
 };

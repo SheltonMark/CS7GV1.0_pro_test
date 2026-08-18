@@ -13,7 +13,7 @@ import QtQuick.Layouts
 FocusScope {
     id: panel
 
-    // 队列条目:{ kind:"auto"|"manual", item, key?, name, sub, op, p1, p2, miss }
+    // 队列条目:{ kind:"auto"|"manual", item, key?, name, sub, op, p1, p2, miss, noCommand? }
     property var queue: []
 
     property int cursor: 0
@@ -59,6 +59,12 @@ FocusScope {
 
     function startCurrent() {
         if (phase !== "item" || !current) return;
+        // 无指令项(评审表 §4.5,现仅咪头):不下发、不查能力位,直接人工判定
+        //(判定靠拉流听声,设备端无执行体是常态,查 miss 反而会误判缺能力)
+        if (current.noCommand === true) {
+            phase = "judge";
+            return;
+        }
         if (current.miss) {
             record("fail", "设备缺能力（SupportedItems 未含该项）");
             return;
@@ -498,7 +504,9 @@ FocusScope {
                         spacing: Theme.s3
                         anchors.horizontalCenter: parent.horizontalCenter
                         Text {
-                            text: "设备已执行，请确认实际现象"
+                            text: panel.current !== null && panel.current.noCommand === true
+                                  ? "无需下发指令，请按判据直接确认"
+                                  : "设备已执行，请确认实际现象"
                             color: Theme.textPrimary
                             font.family: TypeScale.family
                             font.pointSize: TypeScale.heading
