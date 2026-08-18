@@ -38,7 +38,12 @@ FocusScope {
 
     signal allFinished()
 
-    onQueueChanged: reset()
+    // ⚠️ reset 必须延后一拍,不能直接 onQueueChanged: reset()。
+    // queue 绑的是 ViewFinished.testQueue,首次求值往往由外部绑定读 total/phase
+    // 触发(如 ResultBanner.caption);同步 reset 会在那次求值途中写 phase/results,
+    // 把正在求值的绑定就地失效 —— Qt 报 "Binding loop detected for property caption"。
+    // callLater 把写推到本轮求值之后,值不变、环消失。
+    onQueueChanged: Qt.callLater(reset)
     Component.onCompleted: reset()
 
     function reset() {
