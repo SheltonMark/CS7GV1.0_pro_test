@@ -97,6 +97,12 @@ python -m aqt install-tool windows desktop tools_ninja     -O C:\Qt
     `opengl32sw.dll`（20 MB）故意保留（低配机/远程桌面的软渲染兜底）。
 12. **验证必须跑 `dist/` 里的 exe**。qml.exe 预览与编译版走不同的模块解析
     路径，预览正常完全不代表 exe 没坏（坑 1/2/3 都只在编译版发作）。
+13. **构建前必须关掉正在运行的 `dist/ProductTestTool.exe`**。它锁住自己的 exe
+    与已加载的 Qt DLL，最后那步整体替换 `dist/` 会删一半然后被 `set -e` 中断，
+    留下被掏空的 `dist`（连 exe 都只剩 `.msys` 待删存根，重跑构建也修不回来，
+    要手工删目录；A: 盘的删除还不会立即落地，得等一拍）。`build.sh` 已在编译前
+    加占用检查提前 fail —— 判据是"能否以写方式打开 exe"，不按进程名查
+    （MSYS 会把 `tasklist //FI` 的参数当路径处理）。
 
 ## 已知待办
 

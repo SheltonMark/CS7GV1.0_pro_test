@@ -34,4 +34,5 @@ private:
     QJsonObject info_;
     QJsonObject result_;
     bool hasResult_ {false};
+    int heartbeat_ {0};   // 每次读上报自增，模拟固件 5s 一拍的心跳计数
 };

@@ -22,6 +22,9 @@
 //     "productId": "5KHBENFCX2", "deviceName": "1000000003" }
 // secretId/secretKey 齐全 ⇒ 腾讯云直连；否则 Mock 假设备。
 // ⚠️ 密钥文件不进 git（.gitignore 已加），也绝不写日志。
+//
+// 产测 action 共 6 条：WriteStage / ClearPartition / PeripheralTest /
+// WriteIdentity / WriteSuid / Shutdown。在线判定优先看 PtestHeartbeat 新鲜度。
 class CloudClient : public QObject {
     Q_OBJECT
     QML_ELEMENT
@@ -31,8 +34,11 @@ class CloudClient : public QObject {
     Q_PROPERTY(QString productId READ productId WRITE setProductId NOTIFY deviceChanged)
     Q_PROPERTY(QString deviceName READ deviceName WRITE setDeviceName NOTIFY deviceChanged)
     Q_PROPERTY(bool busy READ busy NOTIFY busyChanged)
-    // 在线判定 = 最近一次读设备上报是否成功（顶栏指示用；Mock 恒为在线）
+    // 在线判定优先 = PtestHeartbeat.LastUpdate 新鲜；无心跳时退化为读取成功
     Q_PROPERTY(bool online READ online NOTIFY onlineChanged)
+    // 最近一次读到的心跳计数 / 年龄(ms)。调试页与顶栏诊断用；-1 = 尚未读到。
+    Q_PROPERTY(int heartbeatValue READ heartbeatValue NOTIFY heartbeatChanged)
+    Q_PROPERTY(qint64 heartbeatAgeMs READ heartbeatAgeMs NOTIFY heartbeatChanged)
 
 public:
     explicit CloudClient(QObject *parent = nullptr);
@@ -44,8 +50,10 @@ public:
     void setDeviceName(const QString &value);
     bool busy() const { return inFlight_; }
     bool online() const { return online_; }
+    int heartbeatValue() const { return heartbeatValue_; }
+    qint64 heartbeatAgeMs() const;
 
-    // —— 5 条产测指令。返回本次 RequestId，结果经 commandFinished /
+    // —— 6 条产测指令。返回本次 RequestId，结果经 commandFinished /
     //    commandTimeout / commandFailed 信号回来（按 RequestId 对应）。
     Q_INVOKABLE int writeStage(int stage, const QString &timestamp17);
     Q_INVOKABLE int clearPartition(int scope);
@@ -56,8 +64,8 @@ public:
     // 两个 Secret 传**明文**，本层负责 b64url 编码后下发（物模型硬要求）。
     Q_INVOKABLE int writeIdentity(const QVariantMap &fields);
     Q_INVOKABLE int writeSuid(const QString &suid);
-    // 产测定时关机（PtestShutdown，物模型补充中；Mock 已支持）。
-    // 设备收到即回 ProductTestResult(Command=5)，delaySec 后执行关机。
+    // 产测定时关机（PtestShutdown）。设备收到即回 ProductTestResult(Command=5)，
+    // delaySec 后请求 MCU 关机握手；PC 以下发成功为完成，不等真断电。
     Q_INVOKABLE int shutdownDevice(int delaySec);
 
     // 通用 action（非产测指令，无 RequestId、不回 ProductTestResult，
@@ -81,6 +89,7 @@ signals:
     void deviceChanged();
     void busyChanged();
     void onlineChanged();
+    void heartbeatChanged();
     // 调试页日志（已带时间戳前缀）
     void logLine(const QString &line);
     void commandFinished(int requestId, int command, int item, int code,
@@ -115,6 +124,8 @@ private:
     PendingCommand current_;
     bool inFlight_ {false};
     bool online_ {false};
+    int heartbeatValue_ {-1};
+    qint64 heartbeatLastMs_ {0};   // 0 = 尚未读到心跳
     qint64 deadlineMs_ {0};
     QTimer pollTimer_;
     QTimer idlePollTimer_;

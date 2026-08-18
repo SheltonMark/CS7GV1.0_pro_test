@@ -13,9 +13,22 @@
 
 namespace {
 
-// ProductTestInfo + DeviceInformation 合并成给 QML 的一张表。
-// 带网口产品(CS7G)调焦走 RTSP 直拉,URL 里的 IP 就取自 DeviceInformation 上报。
-QVariantMap InfoMapFromData(const QJsonObject &data)
+// 云端盖章时间戳的单位不是契约：腾讯 DescribeDeviceData 见过秒也见过毫秒，
+// 猜错一个量级 age 就差出五十多年，恒判离线。两者相差三个数量级，用 1e11
+// 一刀切是安全的 —— 该阈值以下的毫秒值早于 1973 年、以上的秒值晚于公元
+// 5138 年，产线上都不可能出现。
+qint64 NormalizeEpochMs(const qint64 stamp)
+{
+    if (stamp <= 0) return 0;
+    return stamp < 100000000000LL ? stamp * 1000 : stamp;
+}
+
+// ProductTestInfo + DeviceInformation + PtestHeartbeat 合并成给 QML 的一张表。
+// 带网口产品(CS7G)调焦走 RTSP 直拉,URL 里的 IP 就取自 DeviceInformation 上报；
+// 心跳计数/年龄供调试页与在线诊断直接展示，不必再拆第二条通道。
+QVariantMap InfoMapFromData(const QJsonObject &data,
+                            const int heartbeatValue,
+                            const qint64 heartbeatAgeMs)
 {
     QJsonObject info = data.value(QStringLiteral("ProductTestInfo"))
                            .toObject().value(QStringLiteral("Value")).toObject();
@@ -27,6 +40,18 @@ QVariantMap InfoMapFromData(const QJsonObject &data)
         info.insert(QStringLiteral("SystemVersion"),
                     device.value(QStringLiteral("SystemVersion")));
     }
+    // 心跳计数一律取 updateOnline 解析后的值：云侧 Value 形态不稳定（可能套一层
+    // 对象、也可能是字符串，见 updateOnline），原样塞进表里 QML 会拿到非数字。
+    if (heartbeatValue >= 0)
+        info.insert(QStringLiteral("PtestHeartbeat"), heartbeatValue);
+    // LastUpdate 保留云端原值、不做单位归一 —— 它是排查"云端发的到底是秒还是
+    // 毫秒"的唯一现场证据；在线判定用的是已归一的 PtestHeartbeatAgeMs。
+    const QJsonObject heartbeat = data.value(QStringLiteral("PtestHeartbeat")).toObject();
+    if (heartbeat.contains(QStringLiteral("LastUpdate")))
+        info.insert(QStringLiteral("PtestHeartbeatLastUpdate"),
+                    heartbeat.value(QStringLiteral("LastUpdate")));
+    if (heartbeatAgeMs >= 0)
+        info.insert(QStringLiteral("PtestHeartbeatAgeMs"), heartbeatAgeMs);
     return info.toVariantMap();
 }
 
@@ -59,12 +84,21 @@ CloudClient::CloudClient(QObject *parent)
             const QJsonObject info =
                 reply.data.value(QStringLiteral("ProductTestInfo"))
                     .toObject().value(QStringLiteral("Value")).toObject();
-            if (!info.isEmpty()) emit infoUpdated(InfoMapFromData(reply.data));
+            if (!info.isEmpty() || heartbeatValue_ >= 0)
+                emit infoUpdated(InfoMapFromData(reply.data, heartbeatValue_,
+                                                 heartbeatAgeMs()));
         });
     });
     idlePollTimer_.start();
 
     loadConfig();
+}
+
+qint64 CloudClient::heartbeatAgeMs() const
+{
+    if (heartbeatLastMs_ <= 0)
+        return -1;
+    return QDateTime::currentMSecsSinceEpoch() - heartbeatLastMs_;
 }
 
 QString CloudClient::mode() const
@@ -191,7 +225,10 @@ void CloudClient::refreshInfo()
         log(QStringLiteral("← ProductTestInfo ") + compact(info));
         if (!result.isEmpty())
             log(QStringLiteral("← ProductTestResult ") + compact(result));
-        emit infoUpdated(InfoMapFromData(reply.data));
+        if (heartbeatValue_ >= 0)
+            log(QStringLiteral("← PtestHeartbeat value=%1 ageMs=%2")
+                    .arg(heartbeatValue_).arg(heartbeatAgeMs()));
+        emit infoUpdated(InfoMapFromData(reply.data, heartbeatValue_, heartbeatAgeMs()));
     });
 }
 
@@ -257,10 +294,12 @@ void CloudClient::pollOnce()
         if (!inFlight_) return;
 
         if (reply.ok) {
-            // ProductTestInfo 顺带带给界面（同一次轮询的免费搭车，不另发请求）
+            // ProductTestInfo/心跳顺带带给界面（同一次轮询的免费搭车）
             const QJsonObject info = reply.data.value(QStringLiteral("ProductTestInfo"))
                                          .toObject().value(QStringLiteral("Value")).toObject();
-            if (!info.isEmpty()) emit infoUpdated(InfoMapFromData(reply.data));
+            if (!info.isEmpty() || heartbeatValue_ >= 0)
+                emit infoUpdated(InfoMapFromData(reply.data, heartbeatValue_,
+                                                 heartbeatAgeMs()));
 
             const QJsonObject result = reply.data.value(QStringLiteral("ProductTestResult"))
                                            .toObject().value(QStringLiteral("Value")).toObject();
@@ -271,9 +310,19 @@ void CloudClient::pollOnce()
                 const int item = result.value(QStringLiteral("Item")).toInt(-1);
                 const int code = result.value(QStringLiteral("Code")).toInt(-1);
                 const QString detail = result.value(QStringLiteral("Detail")).toString();
-                log(QStringLiteral("← 结果 RequestId=%1 Command=%2 Item=%3 Code=%4 %5")
-                        .arg(current_.requestId).arg(command).arg(item).arg(code)
-                        .arg(detail));
+                // Command=5 是 PtestShutdown：设备端契约=受理即回报成功，
+                // 真断电在 DelaySec 之后，PC 以下发成功为完成。
+                const QString cmdName =
+                    command == 0 ? QStringLiteral("WriteStage")
+                    : command == 1 ? QStringLiteral("ClearPartition")
+                    : command == 2 ? QStringLiteral("PeripheralTest")
+                    : command == 3 ? QStringLiteral("WriteIdentity")
+                    : command == 4 ? QStringLiteral("WriteSuid")
+                    : command == 5 ? QStringLiteral("Shutdown")
+                    : QStringLiteral("?");
+                log(QStringLiteral("← 结果 RequestId=%1 Command=%2(%3) Item=%4 Code=%5 %6")
+                        .arg(current_.requestId).arg(command).arg(cmdName)
+                        .arg(item).arg(code).arg(detail));
                 const int id = current_.requestId;
                 inFlight_ = false;
                 emit busyChanged();
@@ -334,6 +383,8 @@ void CloudClient::loadConfig()
 // 在线判定（2026-08-17 需求）：腾讯云自身的在线状态有延迟，以设备心跳包为准
 // —— 设备产测态周期上报 PtestHeartbeat，其 LastUpdate 距今在超时窗口内 = 在线。
 // 固件尚未加心跳（或旧物模型）时退化为"本次读取成功即在线"。
+// 云端时间戳的单位与有无都不可靠，故新鲜度另留一条兜底证据（计数器自增），
+// 两条都走同一个 heartbeatLastMs_，判定口径只有"距今是否在窗口内"这一个。
 void CloudClient::updateOnline(const CloudReply &reply)
 {
     if (!reply.ok) {
@@ -346,11 +397,43 @@ void CloudClient::updateOnline(const CloudReply &reply)
         setOnline(true);
         return;
     }
-    const qint64 lastMs =
-        static_cast<qint64>(heartbeat.value(QStringLiteral("LastUpdate")).toDouble());
+
+    // 心跳计数：优先 Value；兼容云侧偶尔把整型直接放在根上的形态
+    int value = heartbeatValue_;
+    if (heartbeat.contains(QStringLiteral("Value"))) {
+        const QJsonValue v = heartbeat.value(QStringLiteral("Value"));
+        // DescribeDeviceData 有时把 int 属性包成 {"Value": n}，有时 Value 本身又是对象
+        if (v.isDouble())
+            value = v.toInt();
+        else if (v.isObject() && v.toObject().contains(QStringLiteral("Value")))
+            value = v.toObject().value(QStringLiteral("Value")).toInt(value);
+        else if (v.isString())
+            value = v.toString().toInt();
+    }
+    const qint64 lastMs = NormalizeEpochMs(
+        static_cast<qint64>(heartbeat.value(QStringLiteral("LastUpdate")).toDouble()));
+    const bool valueChanged = (value != heartbeatValue_);
+    const bool stampChanged = (lastMs > 0 && lastMs != heartbeatLastMs_);
+    if (valueChanged)
+        heartbeatValue_ = value;
+
+    // 新鲜度有两条独立证据，任一成立就把时间戳推到当下：
+    //   ① 云端盖章的 LastUpdate —— 首选，真机口径
+    //   ② 计数器变化 —— 固件 5s 自增一拍，值一动就说明来了新上报
+    // 少了 ②，云端不给 LastUpdate 时首读之后 heartbeatLastMs_ 再也不会更新，
+    // 一个超时窗口后恒判离线 —— 设备明明在正常心跳。计数器回退（设备重启从
+    // 0 重数）同样算证据，所以判"变化"而不是"变大"。
+    if (stampChanged)
+        heartbeatLastMs_ = lastMs;
+    else if (valueChanged || heartbeatLastMs_ <= 0)
+        heartbeatLastMs_ = QDateTime::currentMSecsSinceEpoch();
+    if (valueChanged || stampChanged)
+        emit heartbeatChanged();
+
     const qint64 windowMs =
         qint64(FactoryConfig::instance()->heartbeatTimeoutSec()) * 1000;
-    setOnline(QDateTime::currentMSecsSinceEpoch() - lastMs <= windowMs);
+    const qint64 age = heartbeatAgeMs();
+    setOnline(age >= 0 && age <= windowMs);
 }
 
 void CloudClient::setOnline(bool value)

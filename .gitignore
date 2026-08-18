@@ -3,5 +3,6 @@ build.stage.*/
 dist/
 dist.stage.*/
 *.zip
+package/
 # 云 API 密钥（本机联调用，build.sh 会带进 dist）——绝不进仓库
 cloud_config.json

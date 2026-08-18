@@ -5,14 +5,34 @@ import QtQuick.Layouts
 
 // 云链路调试页（联调用，非工位）。目标：不进任何工位流程就能
 //   ① 看当前传输形态（Mock 假设备 / 腾讯云直连，由 cloud_config.json 决定）
-//   ② 逐条下发 5 个产测 action，盯"受理→设备执行→上报"的完整闭环
-//   ③ 随时读 ProductTestInfo 汇总
+//   ② 逐条下发 6 个产测 action，盯"受理→设备执行→上报"的完整闭环
+//   ③ 随时读 ProductTestInfo 汇总 + 心跳计数/年龄（在线判定的原始依据）
 // 工位页接真实流程前，所有链路问题先在这页定位——工位页保持 Mock 数据不动。
 Item {
     id: root
 
     // 日志上限：联调一天几千条封顶，500 够回看且不吃内存
     readonly property int maxLogLines: 500
+
+    // 心跳年龄是"距今"的量，属性只在收到新心跳时通知。秒级 tick 让读数在
+    // 界面上真的走字，否则两拍之间看着像卡住，反倒像是链路断了。
+    property int clockTick: 0
+
+    Timer {
+        interval: 1000
+        running: true
+        repeat: true
+        onTriggered: root.clockTick++
+    }
+
+    // tick 只为让绑定跟着秒钟重算，函数体不用它。
+    function heartbeatText(value, ageMs, tick) {
+        if (value < 0) return "";
+        const age = ageMs < 0 ? "未收到"
+                  : ageMs < 10000 ? ageMs + " ms"
+                  : Math.round(ageMs / 1000) + " s";
+        return value + "  (" + age + " 前)";
+    }
 
     function appendLog(line) {
         logModel.append({ line: line });
@@ -115,6 +135,21 @@ Item {
                             font.pointSize: TypeScale.body
                             onEditingFinished: CloudClient.deviceName = text
                         }
+                    }
+
+                    // 在线判定的原始依据，摊开给人看 —— 顶栏那个绿点只有"在/不在"，
+                    // 排障时要知道是哪一头断的：
+                    //   计数不动          = 固件没在上报（产测态没进 / 心跳线程没起）
+                    //   计数在动、年龄很大 = 云端 LastUpdate 单位或有无与预期不符，
+                    //                       此时在线判定靠"计数变化"兜底，仍准
+                    //   整行是"—"        = 这台设备一次心跳都没读到（旧物模型 v1 无此属性）
+                    FieldRow {
+                        Layout.fillWidth: true
+                        label: "心跳"
+                        value: root.heartbeatText(CloudClient.heartbeatValue,
+                                                  CloudClient.heartbeatAgeMs,
+                                                  root.clockTick)
+                        valueColor: CloudClient.online ? Theme.pass : Theme.fail
                     }
                 }
             }

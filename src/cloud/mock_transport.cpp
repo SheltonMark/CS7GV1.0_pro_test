@@ -64,9 +64,11 @@ void MockTransport::readDeviceData(const QString & /*productId*/, const QString 
             {QStringLiteral("ProductTestInfo"),
              QJsonObject{{QStringLiteral("Value"), info_},
                          {QStringLiteral("LastUpdate"), nowMs}}},
-            // 心跳:假设备永远新鲜(真机=固件周期上报,LastUpdate 由云端盖章)
+            // 心跳:假设备永远新鲜(真机=固件周期上报,LastUpdate 由云端盖章)。
+            // 计数照真机自增 —— 钉死成常量的话,"计数器变化=新鲜"那条兜底
+            // 证据在自测里永远走不到,真机上才第一次生效。
             {QStringLiteral("PtestHeartbeat"),
-             QJsonObject{{QStringLiteral("Value"), 1},
+             QJsonObject{{QStringLiteral("Value"), ++heartbeat_},
                          {QStringLiteral("LastUpdate"), nowMs}}},
             // 设备信息:调焦 RTSP 直拉要用的 IP(CS7G 网口)
             {QStringLiteral("DeviceInformation"),

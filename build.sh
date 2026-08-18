@@ -25,6 +25,18 @@ echo "[build] qt   : $QT_ROOT"
 BUILD="$HERE/build"
 DIST="$HERE/dist"
 
+# ⚠️ 最后一步要整体替换 dist/。若 dist/ 里的程序正在运行，它会锁住自己的 exe 和
+# 已加载的 Qt DLL：rm 删掉没锁的部分后失败，set -e 就地中断 —— 留下一个被掏空的
+# dist（上千文件已删、锁定的还在，连 exe 都只剩 .msys 待删存根），必须手工清理才
+# 能再构建。放在编译前拦，省掉两分钟白等。
+# 判据是"能否以写方式打开 exe"而非按进程名查：任何占用方都算，也不受 MSYS 改写
+# tasklist 参数的影响（`//FI` 会被当路径处理）。
+if [ -f "$DIST/ProductTestTool.exe" ] && ! ( : >> "$DIST/ProductTestTool.exe" ) 2>/dev/null; then
+    echo "[build] FAIL dist/ProductTestTool.exe 被占用 —— 程序还在运行。" >&2
+    echo "[build]      先关掉它再构建，否则 dist/ 会被删到一半然后中断。" >&2
+    exit 1
+fi
+
 # CMake 生成期会往 build/qmltypes 写文件但不保证先建目录，
 # 干净构建时会报 "Cannot open file for write"。先建出来。
 mkdir -p "$BUILD/qmltypes"
