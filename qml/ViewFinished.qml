@@ -82,8 +82,12 @@ Item {
     readonly property bool testsClean: seqPanel.confirmed && !seqPanel.anyBad
 
     // ---- 写标识后的自动链 ----
-    // 阶段: ""空闲 | write 写标识(成品含先写产测信息) | collect 采集入库
-    //     | clear 配置清除 | shutdown 定时关机 | done 完成 | failed 失败
+    // 成品相位(定稿 2026-08-18,校验挡在写标识前面):
+    //   "" | verify 产测信息校验(写身份→IMEI→读回比对) | collect 采集信息入库
+    //   | write 写成品标识 | clear 配置清除 | shutdown 定时关机 | done | failed
+    // 准成品: "" | write 写准成品标识 | clear | shutdown | done | failed
+    // 校验不一致绝不能写成品标识:标识一写产测态即退(RTSP 关、身份按成品加载),
+    // 台账里又没这台,只能返修清分区 —— 所以 verify 不过就断链。
     property string chainPhase: ""
     property string chainError: ""
     property int identityReqId: -1
@@ -93,8 +97,15 @@ Item {
     property int recIndex: -1          // 成品:本次使用的批次行
     property string sentStamp: ""      // 刚下发的时间戳(等回读确认)
     property string writtenStamp: ""   // 回读确认后的设备侧真值
-    readonly property bool chainBusy: chainPhase === "write" || chainPhase === "collect"
-                                      || chainPhase === "clear" || chainPhase === "shutdown"
+    property string collectedImei: ""  // 成品:校验通过已入库的 IMEI(""=未到该步)
+    // 断点续走:校验/入库都成了、只差成品标识(写标识那步失败)——
+    // 重试只补写标识,不重写身份、不重复入库
+    readonly property bool canResume: !semi && chainPhase === "failed"
+                                      && collectedImei.length > 0
+                                      && writtenStamp.length === 0 && recIndex >= 0
+    readonly property bool chainBusy: chainPhase === "verify" || chainPhase === "collect"
+                                      || chainPhase === "write" || chainPhase === "clear"
+                                      || chainPhase === "shutdown"
 
     // ---- 成品:MAC 选中批次记录(默认带出第一条未入库,可改,双重校验) ----
     readonly property int macIndex: semi ? -1 : Session.batchIndexOfMac(macField.text)
@@ -118,6 +129,9 @@ Item {
         function onBatchRecordsChanged() { root.refillMac(); }
         function onBatchUsedChanged() {
             if (root.semi) return;
+            // 链执行中/失败待续走时不自动跳 MAC —— 入库发生在写标识之前,
+            // 这时跳到下一条会让"重试补写标识"对错行;完结后由 done 分支跳
+            if (root.chainBusy || root.chainPhase === "failed") return;
             const idx = Session.batchIndexOfMac(macField.text);
             if (macField.text.trim().length === 0
                 || (idx >= 0 && Session.batchUsed[idx] === 1))
@@ -142,23 +156,35 @@ Item {
             Hour: d.getHours(), Minute: d.getMinutes(), Second: d.getSeconds() });
     }
 
-    // 写标识。成品:先写产测信息(批次记录),后写成品标识 —— finishTestFlag 非空
-    // 设备即按"成品"从分区加载身份,顺序反了会产出"空身份的成品"。
+    // 链入口。成品顺序(定稿 2026-08-18):写产测信息 → 读回比对+采IMEI(verify)
+    // → 一致才入库(collect) → 才写成品标识(write) → 清除 → 关机。
+    // 身份仍先于标识(finishTestFlag 非空设备即按"成品"从分区加载身份,
+    // 反了会产出"空身份的成品");校验不一致在 verify 断链,标识不会写。
     function doWriteStage() {
         chainError = "";
-        chainPhase = "write";
-        if (!semi) {
-            recIndex = macIndex;
-            const rec = Session.batchRecords[recIndex];
-            identityReqId = CloudClient.writeIdentity({
-                Mac: rec[0], Sn: rec[1], DeviceName: rec[2], Uuid: rec[3],
-                DeviceSecret: rec[4], ProductKey: rec[5], ProductSecret: rec[6],
-                Language: rec[7]
-            });
-            return;  // 身份结果回来再写标识,见 handleResult
+        if (semi) {
+            chainPhase = "write";
+            sentStamp = nowStamp17();
+            writeReqId = CloudClient.writeStage(2, sentStamp);
+            return;
         }
-        sentStamp = nowStamp17();
-        writeReqId = CloudClient.writeStage(2, sentStamp);
+        if (canResume) {   // 上轮已校验入库、只差标识 → 直接补写
+            chainPhase = "write";
+            sentStamp = nowStamp17();
+            writeReqId = CloudClient.writeStage(3, sentStamp);
+            return;
+        }
+        collectedImei = "";
+        writtenStamp = "";
+        chainPhase = "verify";
+        recIndex = macIndex;
+        const rec = Session.batchRecords[recIndex];
+        identityReqId = CloudClient.writeIdentity({
+            Mac: rec[0], Sn: rec[1], DeviceName: rec[2], Uuid: rec[3],
+            DeviceSecret: rec[4], ProductKey: rec[5], ProductSecret: rec[6],
+            Language: rec[7]
+        });
+        // 身份结果回来 → 采 IMEI → 读回比对,见 handleResult / onInfoUpdated
     }
 
     function chainFail(reason) {
@@ -193,8 +219,8 @@ Item {
         if (requestId === identityReqId) {              // —— 成品:写产测信息结果
             identityReqId = -1;
             if (code === 0) {
-                sentStamp = nowStamp17();               // 身份已落,再写成品标识
-                writeReqId = CloudClient.writeStage(3, sentStamp);
+                // 身份已落分区 → 读回比对要连同 IMEI,先发 4G 查询(仍在 verify)
+                imeiReqId = CloudClient.peripheralTest(9, 0, 0, 0, "");
             } else {
                 chainFail("产测信息写入失败  Code=" + code
                           + (detail.length > 0 ? "  " + detail : ""));
@@ -228,6 +254,7 @@ Item {
                 chainPhase = "done";
                 toast.show((semi ? "准成品" : "成品") + "流程完成：设备将在 "
                            + FactoryConfig.shutdownDelaySec + " 秒后关机", true);
+                refillMac();   // 本台完结才跳下一条 MAC(入库时刻已不再自动跳)
             } else {
                 chainFail("定时关机下发失败  Code=" + code
                           + (detail.length > 0 ? "  " + detail : ""));
@@ -256,30 +283,33 @@ Item {
                     root.sentStamp = "";
                     toast.show((root.semi ? "准成品" : "成品") + "标识已写入并回读确认  "
                                + root.writtenStamp, true);
-                    if (root.semi) {
-                        root.startClear();               // 准成品:直接进配置清除
-                    } else {
-                        root.chainPhase = "collect";     // 成品:采集入库,先要 IMEI
-                        root.imeiReqId = CloudClient.peripheralTest(9, 0, 0, 0, "");
-                    }
+                    root.startClear();   // 成品的校验/入库已在写标识之前完成
                 }
                 return;
             }
-            // ② 成品采集入库:IMEI 指令已回,此次回读做全量校验+取 IMEI
-            if (root.chainPhase === "collect" && root.imeiReqId < 0 && root.recIndex >= 0) {
+            // ② 成品·产测信息校验:IMEI 指令已回,此次回读做全量比对+取 IMEI。
+            // 通过才入库、才轮到写成品标识(定稿 2026-08-18:校验不一致绝不能
+            // 写标识 —— 见 chainPhase 注释)。
+            if (root.chainPhase === "verify" && root.imeiReqId < 0 && root.recIndex >= 0) {
                 const rec = Session.batchRecords[root.recIndex];
                 const bad = root.verifyRecord(rec, info);
                 const imei = info.Imei !== undefined ? info.Imei : "";
                 if (bad.length > 0 || imei.length === 0) {
-                    // 口径:校验不过 → InputData2 该行 IMEI 留空白、不置入库标记
+                    // 口径:校验不过 → 不写标识;InputData2 该行 IMEI 留空白、
+                    // 不置入库标记(设备转维修后该批次行仍可用)
                     root.chainFail(bad.length > 0
                         ? "产测信息校验不匹配: " + bad.join("、")
                         : "设备未上报 IMEI");
                     return;
                 }
+                root.chainPhase = "collect";
                 Session.markBatchDone(root.recIndex, imei);
-                toast.show("采集信息入库完成  IMEI " + imei, true);
-                root.startClear();
+                root.collectedImei = imei;
+                toast.show("产测信息校验一致，已入库  IMEI " + imei, true);
+                // 入库完成 → 写成品标识
+                root.chainPhase = "write";
+                root.sentStamp = root.nowStamp17();
+                root.writeReqId = CloudClient.writeStage(3, root.sentStamp);
             }
         }
         function onGenericActionDone(actionId, ok, error) {
@@ -303,26 +333,37 @@ Item {
         seqPanel.forceActiveFocus();
     }
 
-    // ---- 工位步骤(动态跟随;准成品写标识步文案=写准成品标识) ----
+    // ---- 工位步骤(动态跟随;成品顺序=定稿 2026-08-18) ----
+    // 成品: 连接 → 逐项测试 → 产测信息校验 → 采集信息入库 → 写成品标识 → 清除 → 关机
+    // 准成品: 连接 → 逐项测试 → 写准成品标识 → 清除 → 关机
     readonly property var steps: {
-        const rank = ["write", "collect", "clear", "shutdown", "done"].indexOf(chainPhase);
+        const rank = ["verify", "collect", "write", "clear", "shutdown", "done"]
+                         .indexOf(chainPhase);
         var out = [
             { name: "连接设备 · 读信息",
               state: infoConnected ? 2 : 1 },
             { name: "逐项测试 " + seqPanel.settled + "/" + seqPanel.total,
               state: seqPanel.confirmed ? (seqPanel.anyBad ? 1 : 2)
                      : (seqPanel.settled > 0 || seqPanel.phase === "running"
-                        || seqPanel.phase === "summary" ? 1 : 0) },
-            { name: semi ? "写准成品标识" : "写成品标识",
-              state: writtenStamp.length > 0 ? 2
-                     : (chainPhase === "write"
-                        || (testsClean && (semi || macError.length === 0)) ? 1 : 0) }
+                        || seqPanel.phase === "summary" ? 1 : 0) }
         ];
-        if (!semi)
+        if (!semi) {
+            out.push({ name: "产测信息校验",
+                       state: collectedImei.length > 0 ? 2
+                              : (chainPhase === "verify"
+                                 || (testsClean && macError.length === 0
+                                     && !chainBusy && writtenStamp.length === 0)
+                                 ? 1 : 0) });
             out.push({ name: "采集信息入库",
-                       state: rank > 1 ? 2 : (chainPhase === "collect" ? 1 : 0) });
+                       state: collectedImei.length > 0 ? 2
+                              : (chainPhase === "collect" ? 1 : 0) });
+        }
+        out.push({ name: semi ? "写准成品标识" : "写成品标识",
+                   state: writtenStamp.length > 0 ? 2
+                          : (chainPhase === "write"
+                             || (semi && testsClean) || canResume ? 1 : 0) });
         out.push({ name: "配置清除",
-                   state: rank > 2 ? 2 : (chainPhase === "clear" ? 1 : 0) });
+                   state: rank > 3 ? 2 : (chainPhase === "clear" ? 1 : 0) });
         out.push({ name: "定时关机 " + FactoryConfig.shutdownDelaySec + "s",
                    state: chainPhase === "done" ? 2
                           : (chainPhase === "shutdown" ? 1 : 0) });
@@ -409,13 +450,17 @@ Item {
                         kind: "primary"
                         enabled: root.testsClean && !root.chainBusy
                                  && root.chainPhase !== "done"
-                                 && (root.semi || root.macError.length === 0)
+                                 && (root.semi || root.macError.length === 0
+                                     || root.canResume)
                         onClicked: confirm.ask(
                             semi ? "写入准成品标识？" : "写入成品标识？",
                             semi ? "将写入准成品（Stage=2）时间戳并回读核对，随后自动执行：配置清除 → 定时关机（"
                                    + FactoryConfig.shutdownDelaySec + " 秒）。"
-                                 : "将写入该 MAC 对应批次记录的产测信息与成品标识，随后自动执行：采集信息入库（IMEI+校验）→ 配置清除 → 定时关机（"
-                                   + FactoryConfig.shutdownDelaySec + " 秒）。",
+                                 : (root.canResume
+                                    ? "上次已校验一致并入库、仅成品标识未写：本次只补写标识，随后自动执行：配置清除 → 定时关机（"
+                                      + FactoryConfig.shutdownDelaySec + " 秒）。"
+                                    : "将写入该 MAC 批次记录的产测信息并读回校验（含 IMEI），校验一致才入库并写成品标识；随后自动执行：配置清除 → 定时关机（"
+                                      + FactoryConfig.shutdownDelaySec + " 秒）。校验不一致将中止，不写成品标识。"),
                             function () { root.doWriteStage() })
                     }
 
@@ -569,9 +614,11 @@ Item {
 
             Text {
                 text: {
+                    if (root.chainPhase === "verify")
+                        return "产测信息校验：写入产测信息并读回比对（含 IMEI）…";
+                    if (root.chainPhase === "collect") return "采集信息入库…";
                     if (root.chainPhase === "write")
-                        return root.semi ? "正在写入准成品标识…" : "正在写入产测信息与成品标识…";
-                    if (root.chainPhase === "collect") return "采集信息入库：获取 IMEI 并校验…";
+                        return root.semi ? "正在写入准成品标识…" : "正在写入成品标识…";
                     if (root.chainPhase === "clear") return "配置清除：恢复出厂设置…";
                     if (root.chainPhase === "shutdown")
                         return "下发定时关机（" + FactoryConfig.shutdownDelaySec + " 秒）…";

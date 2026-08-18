@@ -84,6 +84,11 @@ python -m aqt install-tool windows desktop tools_ninja     -O C:\Qt
 - **整机产测通过的最终判据 = 四阶段时间戳齐全**（FocusTime/SemiTime/FinishTime/
   InspectTime 全非空，评审表 §4.10），代替「成品标识已写」。台账/导出报表要有
   InspectTime 列。
+- **成品写标识链顺序**（定稿 2026-08-18）：逐项测试 → 产测信息校验（写 InputData1
+  该行身份 → 读回逐字段比对 + 采 IMEI）→ 采集信息入库（IMEI 写 InputData2）→
+  写成品标识 → 配置清除 → 定时关机。**校验不一致不写成品标识**（该行不入库、
+  IMEI 留空，设备转维修后批次行仍可用）；写标识失败可断点续走（只补写标识，
+  不重写身份不重复入库）。
 - 检查页三条已定协议（可用性不看 `Active`、超时重试复用同一 Timestamp + 新
   RequestId、mapper 层拒绝不回 ProductTestResult 靠超时兜底）见
   `qml/ViewInspect.qml` 头注释，实现时勿偏离。
