@@ -59,11 +59,17 @@ Item {
         return value + "  (" + age + " 前)";
     }
 
+    // 单块文本而非 ListView 逐行 delegate：每行各是一个 TextEdit 时选区
+    // 跨不过行边界（2026-08-19 现场反馈"只能选一两行"）——多行复制必须是
+    // 同一个文本对象。代价是丢逐行着色，行内 ✓/✗/⏱/← 符号本就承载状态。
+    property var logLines: []
+    property string logText: ""
+
     function appendLog(line) {
-        logModel.append({ line: line });
-        if (logModel.count > root.maxLogLines)
-            logModel.remove(0, logModel.count - root.maxLogLines);
-        logView.positionViewAtEnd();
+        logLines.push(line);
+        if (logLines.length > root.maxLogLines)
+            logLines.splice(0, logLines.length - root.maxLogLines);
+        logText = logLines.join("\n");
     }
 
     // 17 位 YYYYMMDDHHMMSSmmm——写阶段用 PC 时钟（产线台账以 PC 时间为准）
@@ -380,31 +386,25 @@ Item {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
 
-                ListView {
-                    id: logView
+                ScrollView {
+                    id: logScroll
                     anchors.fill: parent
                     clip: true
-                    spacing: 2
-                    model: ListModel { id: logModel }
-
-                    // TextEdit 而非 Text：现场排障要把行贴给别人（时间戳/RequestId/
-                    // 错误码），只能看不能选等于逼人抄屏。跨行整段导出走右上「复制」。
-                    delegate: TextEdit {
-                        required property string line
-                        width: logView.width
-                        text: line
+                    TextArea {
+                        id: logArea
+                        width: logScroll.availableWidth  // 不钉宽度长行不换行
                         readOnly: true
-                        selectByMouse: true
-                        color: line.indexOf("❌") >= 0 || line.indexOf("✗") >= 0
-                                 || line.indexOf("⏱") >= 0 ? Theme.fail
-                               : line.indexOf("✅") >= 0 ? Theme.pass
-                               : line.indexOf("←") >= 0 ? Theme.textPrimary
-                               : Theme.textSecondary
-                        selectedTextColor: Theme.bg
-                        selectionColor: Theme.textSecondary
+                        selectByMouse: true              // 单块文本 ⇒ 选区可跨任意多行
+                        text: root.logText
+                        // 新行到来自动滚到底（游标追到末尾，ScrollView 跟随）。
+                        // 代价：正选中时来了新行会清掉选区——流水只在下发/读取
+                        // 时新增，不是持续刷屏，可接受。
+                        onTextChanged: cursorPosition = length
+                        wrapMode: TextArea.WrapAnywhere
+                        background: null
+                        color: Theme.textSecondary
                         font.family: "Consolas"
                         font.pointSize: TypeScale.caption
-                        wrapMode: TextEdit.WrapAnywhere
                     }
                 }
 
@@ -414,10 +414,7 @@ Item {
                     height: 30
                     text: copiedTick.running ? "已复制" : "复制"
                     onClicked: {
-                        var all = "";
-                        for (var i = 0; i < logModel.count; ++i)
-                            all += logModel.get(i).line + "\n";
-                        FileIo.copyText(all);
+                        FileIo.copyText(root.logText);
                         copiedTick.restart();
                     }
                     Timer { id: copiedTick; interval: 1200 }

@@ -94,6 +94,17 @@ fi
 # 工厂配置（工艺参数+测试项勾选默认值）随包发，产线可直接改
 cp "$HERE/resources/factory_config.json" "$DIST_WORK/"
 
+# 保留上一版 dist 的现场配置，优先级最高（2026-08-19 实证：整目录替换把手放
+# 的密钥文件删了，软件静默回落 Mock 假设备——"界面全过实则没连云"最难察觉）。
+#   cloud_config.json    产线密钥（不进 git，常被直接放在 dist）
+#   factory_config.json  管理员在软件里勾选的测试项会写回此文件，重建不能清
+if [ -f "$DIST/cloud_config.json" ]; then
+    cp "$DIST/cloud_config.json" "$DIST_WORK/"
+fi
+if [ -f "$DIST/factory_config.json" ]; then
+    cp "$DIST/factory_config.json" "$DIST_WORK/"
+fi
+
 # 注意：opengl32sw.dll（约 20MB）是软件 OpenGL 兜底，故意保留。
 # 产线电脑常是低配机/显卡驱动不全/远程桌面登录，缺它会白屏或崩，
 # 省这 20MB 不值得拿停线风险换。
