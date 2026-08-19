@@ -31,6 +31,10 @@ public:
     // 取文件名（QML 里从 URL 拿显示名，省得自己切字符串）
     Q_INVOKABLE QString fileName(const QUrl &url) const;
 
+    // 复制到系统剪贴板（云调试页导日志用——QML 自身没有剪贴板 API，
+    // TextEdit 只能选中复制，整段一键导出必须下沉到 C++）。
+    Q_INVOKABLE void copyText(const QString &text) const;
+
 private:
     QString last_error_;
 };

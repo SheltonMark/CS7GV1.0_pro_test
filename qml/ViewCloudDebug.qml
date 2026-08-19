@@ -351,6 +351,7 @@ Item {
                         // 那种无空格长串)永远不换行,只把自己横向拉出可视区。
                         width: infoScroll.availableWidth
                         readOnly: true
+                        selectByMouse: true    // 排障要抄字段值,readOnly 默认不可选
                         text: "（点「读产测信息」拉取）"
                         wrapMode: TextArea.WrapAnywhere
                         background: null
@@ -386,19 +387,40 @@ Item {
                     spacing: 2
                     model: ListModel { id: logModel }
 
-                    delegate: Text {
+                    // TextEdit 而非 Text：现场排障要把行贴给别人（时间戳/RequestId/
+                    // 错误码），只能看不能选等于逼人抄屏。跨行整段导出走右上「复制」。
+                    delegate: TextEdit {
                         required property string line
                         width: logView.width
                         text: line
+                        readOnly: true
+                        selectByMouse: true
                         color: line.indexOf("❌") >= 0 || line.indexOf("✗") >= 0
                                  || line.indexOf("⏱") >= 0 ? Theme.fail
                                : line.indexOf("✅") >= 0 ? Theme.pass
                                : line.indexOf("←") >= 0 ? Theme.textPrimary
                                : Theme.textSecondary
+                        selectedTextColor: Theme.bg
+                        selectionColor: Theme.textSecondary
                         font.family: "Consolas"
                         font.pointSize: TypeScale.caption
-                        wrapMode: Text.WrapAnywhere
+                        wrapMode: TextEdit.WrapAnywhere
                     }
+                }
+
+                AppButton {
+                    anchors { top: parent.top; right: parent.right }
+                    z: 1
+                    height: 30
+                    text: copiedTick.running ? "已复制" : "复制"
+                    onClicked: {
+                        var all = "";
+                        for (var i = 0; i < logModel.count; ++i)
+                            all += logModel.get(i).line + "\n";
+                        FileIo.copyText(all);
+                        copiedTick.restart();
+                    }
+                    Timer { id: copiedTick; interval: 1200 }
                 }
             }
 
@@ -469,6 +491,7 @@ Item {
                     TextArea {
                         width: tailScroll.availableWidth   // 同上:不钉宽度长行不换行
                         readOnly: true
+                        selectByMouse: true
                         // 内容 = root.logTailText，仅 Seq 变化时被 onInfoUpdated 更新
                         text: root.logTailText.length > 0 ? root.logTailText
                                                           : "—（设备未上报该属性）"
@@ -478,6 +501,19 @@ Item {
                         font.family: "Consolas"
                         font.pointSize: TypeScale.caption
                     }
+                }
+
+                AppButton {
+                    anchors { top: parent.top; right: parent.right }
+                    z: 1
+                    height: 30
+                    visible: root.logTailText.length > 0
+                    text: tailCopiedTick.running ? "已复制" : "复制"
+                    onClicked: {
+                        FileIo.copyText(root.logTailText);
+                        tailCopiedTick.restart();
+                    }
+                    Timer { id: tailCopiedTick; interval: 1200 }
                 }
             }
         }

@@ -1,8 +1,15 @@
 #include "file_io.hpp"
 
+#include <QClipboard>
 #include <QFile>
 #include <QFileInfo>
+#include <QGuiApplication>
 #include <QTextStream>
+
+void FileIo::copyText(const QString &text) const {
+    if (QClipboard *clipboard = QGuiApplication::clipboard())
+        clipboard->setText(text);
+}
 
 QString FileIo::readText(const QUrl &url) {
     last_error_.clear();
