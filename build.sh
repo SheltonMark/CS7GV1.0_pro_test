@@ -105,6 +105,23 @@ if [ -f "$DIST/factory_config.json" ]; then
     cp "$DIST/factory_config.json" "$DIST_WORK/"
 fi
 
+# VLC 运行时（拉流引擎，约 137MB）。Qt Multimedia 对 RTSP/H265 大流与 http-flv
+# 直播都不行（2026-08-19 定案换 libvlc，详见 src/stream/vlc_stream_player.hpp）。
+# 优先沿用上一版 dist 里的（网络盘上少拷 130MB）；没有才从本机 VLC 取，
+# 来源可用环境变量 VLC_RUNTIME 覆盖。缺失只警告不断链——包照出，拉流报错。
+VLC_RUNTIME=${VLC_RUNTIME:-/d/tools/VLC}
+if [ -f "$DIST/vlc/libvlc.dll" ]; then
+    mkdir -p "$DIST_WORK/vlc"
+    cp -r "$DIST/vlc/." "$DIST_WORK/vlc/"
+elif [ -f "$VLC_RUNTIME/libvlc.dll" ]; then
+    mkdir -p "$DIST_WORK/vlc/plugins"
+    cp "$VLC_RUNTIME/libvlc.dll" "$VLC_RUNTIME/libvlccore.dll" "$DIST_WORK/vlc/"
+    cp -r "$VLC_RUNTIME/plugins/." "$DIST_WORK/vlc/plugins/"
+    echo "[build] vlc  : bundled from $VLC_RUNTIME"
+else
+    echo "[build] WARN: VLC runtime not found ($VLC_RUNTIME) — 拉流将不可用" >&2
+fi
+
 # 注意：opengl32sw.dll（约 20MB）是软件 OpenGL 兜底，故意保留。
 # 产线电脑常是低配机/显卡驱动不全/远程桌面登录，缺它会白屏或崩，
 # 省这 20MB 不值得拿停线风险换。

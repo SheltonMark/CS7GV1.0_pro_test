@@ -11,31 +11,11 @@
 
 int main(int argc, char *argv[])
 {
-    // —— 拉流解码策略（必须在 QGuiApplication 之前设：多媒体后端在插件加载
-    //    时就读这些变量）——
-    //
-    // ⚠️ 不要强制软解。2026-08-19 用命令行 VLC 抓 -vv 日志才看清：设备主码流是
-    // **2560x1472**（约 380 万像素），VLC 是靠 d3d11va 硬解（Intel UHD 630）才
-    // 放得动的：
-    //   d3d11va debug: va_pool_SetupDecoder id 173 2560x1472 count: 28
-    //   avcodec: Using D3D11VA (Intel UHD Graphics 630) for hardware decoding
-    // 我先前按"640x360 软解毫无压力"的错误假设把硬解整个关掉（置空
-    // DECODING_HW_DEVICE_TYPES），在集显工位机上 CPU 根本喂不动这个分辨率
-    // ⇒ 解码持续跟不上、帧全被丢 ⇒ 界面停在"已解析｜视频轨 1"永不出图。
-    // 所以这里**保留 Qt 默认的硬解优先**，只放开 level 标签不匹配的容忍
-    // （设备 SDP 报 level-id=180 即 Level 6.0，比 2560x1472 实际所需高得多，
-    //  部分驱动会因此拒绝——允许不匹配后按实际分辨率建解码器即可）。
-    qputenv("QT_FFMPEG_HW_ALLOW_PROFILE_MISMATCH", QByteArrayLiteral("1"));
-    // 协议白名单必须**含 udp/rtp**：2026-08-19 实测把它们剔除想逼 TCP 回落，
-    // 结果 FFmpeg 连 RTSP 会话都打不开（`Could not open file`、视频轨 0），
-    // 比默认更糟——rtsp 解复用器初始化阶段就依赖这两个协议注册在册。
-    // 强制 TCP 改由 URL 层解决（见 ViewFocus 的 rtspUrlTemplate 说明）。
-    qputenv("QT_FFMPEG_PROTOCOL_WHITELIST",
-            QByteArrayLiteral("file,crypto,data,http,https,tcp,tls,rtsp,rtp,udp,httpproxy"));
-    // 拉流排障开关（产线默认关）：设 PTEST_STREAM_DEBUG=1 启动，
-    // 后端会把解复用/解码细节打到 stderr，用来定位"黑屏到底黑在哪一层"。
-    if (!qEnvironmentVariableIsEmpty("PTEST_STREAM_DEBUG"))
-        qputenv("QT_FFMPEG_DEBUG", QByteArrayLiteral("1"));
+    // 拉流引擎已切换为 libvlc（src/stream/vlc_stream_player，2026-08-19 定案：
+    // Qt Multimedia 对设备 2560x1472 H265 RTSP "已解析却零帧"，且不支持云拉流
+    // 要用的 http-flv 直播）。此前在这里调 QT_FFMPEG_* 环境变量的若干尝试
+    // （强制软解/协议白名单）均已随引擎切换移除；排障开关 PTEST_STREAM_DEBUG=1
+    // 保留——现在它放行 libvlc 的全量日志（见 VlcStreamPlayer 的 LogCb）。
 
     QGuiApplication app(argc, argv);
 

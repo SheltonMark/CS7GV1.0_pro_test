@@ -35,7 +35,7 @@ qt_add_executable(app_ptest src/main.cpp ${CMAKE_BINARY_DIR}/Application.rc)
 # ⚠️ 带 QML_ELEMENT 的头所在目录都必须单独列进来——注册文件按**文件名**
 # 尖括号查找（<cloud_client.hpp> 而非 <cloud/cloud_client.hpp>），
 # 少列的表现是 "'CloudClient' was not declared in this scope"。
-target_include_directories(app_ptest PRIVATE src src/cloud)
+target_include_directories(app_ptest PRIVATE src src/cloud src/stream)
 
 # qt_add_qml_module 只带进 Qml 依赖；QGuiApplication 来自 Gui、
 # QQuickStyle 来自 QuickControls2，必须显式链，否则连头文件都找不到。
@@ -99,6 +99,8 @@ qt_add_qml_module(app_ptest
         qml/ProductGate.qml
         qml/ViewLogin.qml
     SOURCES
+        src/stream/vlc_stream_player.hpp
+        src/stream/vlc_stream_player.cpp
         # 批次文件读写。QML 无文件写入 API，只把读/写下沉到 C++，
         # 解析与列语义留在 QML（列定义还没和产线定死，改 QML 不必重编 C++）。
         src/file_io.hpp
