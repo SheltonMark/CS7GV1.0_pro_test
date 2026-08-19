@@ -44,13 +44,38 @@ Rectangle {
         else player.stop();
     }
 
+    // 诊断态：黑屏时"到底黑在哪一层"要能一眼看出——媒体状态告诉你是没建联、
+    // 建联了没解出视频轨、还是解出来了但没帧（2026-08-19 现场排查这三层
+    // 只能靠猜，界面只写"拉流失败"帮不上忙）。
+    readonly property string diagText: {
+        if (!streaming) return "";
+        var st = player.mediaStatus === MediaPlayer.NoMedia ? "无媒体"
+               : player.mediaStatus === MediaPlayer.LoadingMedia ? "解析中"
+               : player.mediaStatus === MediaPlayer.LoadedMedia ? "已解析"
+               : player.mediaStatus === MediaPlayer.StalledMedia ? "缓冲中断"
+               : player.mediaStatus === MediaPlayer.BufferingMedia ? "缓冲中"
+               : player.mediaStatus === MediaPlayer.BufferedMedia ? "已缓冲"
+               : player.mediaStatus === MediaPlayer.EndOfMedia ? "流结束"
+               : player.mediaStatus === MediaPlayer.InvalidMedia ? "媒体非法" : "?";
+        return st + "｜视频轨 " + player.videoTracks.length
+             + "｜音频轨 " + player.audioTracks.length;
+    }
+
     MediaPlayer {
         id: player
         source: root.sourceUrl
         videoOutput: vout
         // 音频要出:成品工位"喇叭放音+咪头回传"一步双验靠 PC 音箱可闻
         audioOutput: AudioOutput { }
-        onErrorOccurred: (error, errorString) => { root.streamError = errorString; }
+        onErrorOccurred: (error, errorString) => {
+            root.streamError = errorString + "（错误码 " + error + "）";
+            console.warn("[stream] error=" + error + " " + errorString
+                         + " url=" + root.sourceUrl);
+        }
+        // 状态跃迁打日志：出问题时让工人/工程师能把这几行贴出来
+        onMediaStatusChanged: console.log("[stream] mediaStatus=" + mediaStatus
+                                         + " url=" + root.sourceUrl)
+        onPlaybackStateChanged: console.log("[stream] playbackState=" + playbackState)
     }
 
     // 视频层在最底,三分线/LIVE 标记盖在其上
@@ -109,6 +134,26 @@ Rectangle {
             visible: text.length > 0
             color: Theme.textDim
             font.family: TypeScale.family
+            font.pointSize: TypeScale.caption
+            anchors.horizontalCenter: parent.horizontalCenter
+        }
+        // 建联/解码分层诊断（只在拉流态显示，画面出来即整块隐藏）
+        Text {
+            text: root.diagText
+            visible: text.length > 0 && !root.compact
+            color: Theme.textDim
+            font.family: "Consolas"
+            font.pointSize: TypeScale.caption
+            anchors.horizontalCenter: parent.horizontalCenter
+        }
+        // URL 可选中复制——排障要拿它去 VLC 对照验证
+        TextEdit {
+            visible: root.streaming && !root.compact
+            text: root.sourceUrl
+            readOnly: true
+            selectByMouse: true
+            color: Theme.textDim
+            font.family: "Consolas"
             font.pointSize: TypeScale.caption
             anchors.horizontalCenter: parent.horizontalCenter
         }
