@@ -27,8 +27,26 @@ int main(int argc, char *argv[])
     qputenv("QT_FFMPEG_DECODING_HW_DEVICE_TYPES", QByteArray());
     // 双保险：万一将来改回硬解，也别因 level 标签不匹配就整个放弃。
     qputenv("QT_FFMPEG_HW_ALLOW_PROFILE_MISMATCH", QByteArrayLiteral("1"));
+    // 强制 RTSP 走 TCP 交织（把 udp/rtp 踢出协议白名单实现）。
+    //
+    // 2026-08-19 实测证据链：
+    //   ① 从 PC 手工完成 OPTIONS→DESCRIBE→SETUP→PLAY，用
+    //      `Transport: RTP/AVP/TCP;unicast;interleaved=0-1`，3 秒收到
+    //      246KB / 28 个数据块 ⇒ 设备喂帧与 live555 打包都正常；
+    //   ② 本软件（Qt 默认 UDP 收 RTP）停在"已解析｜视频轨 1"永不进"已缓冲"
+    //      ⇒ 轨道识别成功但一帧未达解码器；
+    //   ③ VLC 有画面——它在 UDP 收不到时会自动回落 TCP，Qt 不会。
+    // Qt 6.8 没有暴露 rtsp_transport 这个 AVOption，但 FFmpeg 的 RTSP 客户端
+    // 在 UDP 传输打不开时本身会回落 TCP 交织；把 udp/rtp 从白名单剔除即可
+    // 迫使它走那条路（交织 RTP 复用已建立的 TCP 连接，不需要额外协议）。
+    // 产线上 TCP 也本就该是首选：不受防火墙入站策略与丢包影响。
+    qputenv("QT_FFMPEG_PROTOCOL_WHITELIST",
+            QByteArrayLiteral("file,crypto,data,http,https,tcp,tls,rtsp,httpproxy"));
     // 拉流排障开关（产线默认关）：设 PTEST_STREAM_DEBUG=1 启动，
     // 后端会把解复用/解码细节打到 stderr，用来定位"黑屏到底黑在哪一层"。
+    // 若要临时对比 UDP 行为，设 PTEST_STREAM_ALLOW_UDP=1 放回默认白名单。
+    if (!qEnvironmentVariableIsEmpty("PTEST_STREAM_ALLOW_UDP"))
+        qunsetenv("QT_FFMPEG_PROTOCOL_WHITELIST");
     if (!qEnvironmentVariableIsEmpty("PTEST_STREAM_DEBUG"))
         qputenv("QT_FFMPEG_DEBUG", QByteArrayLiteral("1"));
 
