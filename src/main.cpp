@@ -14,18 +14,17 @@ int main(int argc, char *argv[])
     // —— 拉流解码策略（必须在 QGuiApplication 之前设：多媒体后端在插件加载
     //    时就读这些变量）——
     //
-    // 强制软解。2026-08-19 现场：VLC 能出画面（花屏但有图），本软件全黑。
-    // 设备 SDP 里 H265 是 `profile-id=1 level-id=180`，即 **Level 6.0** ——
-    // 这个等级标签异常高，相当多的硬件解码器只认到 5.1，遇到 6.0 直接拒绝
-    // 建解码器 ⇒ 一帧不出 ⇒ 纯黑（VLC 默认会回落软解，所以它有画面）。
-    // Qt FFmpeg 后端存在 QT_FFMPEG_HW_ALLOW_PROFILE_MISMATCH 这个开关本身，
-    // 就说明"硬解遇到 profile/level 不匹配"是它已知的坑。
-    //
-    // 产线取确定性而非省 CPU：工位机的显卡/驱动五花八门，软解一条
-    // 640x360~1080p 的 H265 对近十年的 CPU 都是小事，而"这台能放那台黑屏"
-    // 的排查成本高得多。空值 = 不启用任何硬解设备。
-    qputenv("QT_FFMPEG_DECODING_HW_DEVICE_TYPES", QByteArray());
-    // 双保险：万一将来改回硬解，也别因 level 标签不匹配就整个放弃。
+    // ⚠️ 不要强制软解。2026-08-19 用命令行 VLC 抓 -vv 日志才看清：设备主码流是
+    // **2560x1472**（约 380 万像素），VLC 是靠 d3d11va 硬解（Intel UHD 630）才
+    // 放得动的：
+    //   d3d11va debug: va_pool_SetupDecoder id 173 2560x1472 count: 28
+    //   avcodec: Using D3D11VA (Intel UHD Graphics 630) for hardware decoding
+    // 我先前按"640x360 软解毫无压力"的错误假设把硬解整个关掉（置空
+    // DECODING_HW_DEVICE_TYPES），在集显工位机上 CPU 根本喂不动这个分辨率
+    // ⇒ 解码持续跟不上、帧全被丢 ⇒ 界面停在"已解析｜视频轨 1"永不出图。
+    // 所以这里**保留 Qt 默认的硬解优先**，只放开 level 标签不匹配的容忍
+    // （设备 SDP 报 level-id=180 即 Level 6.0，比 2560x1472 实际所需高得多，
+    //  部分驱动会因此拒绝——允许不匹配后按实际分辨率建解码器即可）。
     qputenv("QT_FFMPEG_HW_ALLOW_PROFILE_MISMATCH", QByteArrayLiteral("1"));
     // 协议白名单必须**含 udp/rtp**：2026-08-19 实测把它们剔除想逼 TCP 回落，
     // 结果 FFmpeg 连 RTSP 会话都打不开（`Could not open file`、视频轨 0），
