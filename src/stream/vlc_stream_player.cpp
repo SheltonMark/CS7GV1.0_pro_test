@@ -3,12 +3,14 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QLibrary>
+#include <QThread>
 #include <QVideoFrame>
 #include <QVideoFrameFormat>
 
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
+#include <utility>
 
 // ───────────────────────── libvlc C ABI（无头文件，按 3.0.x 文档手写）─────────
 // 只声明用到的十余个入口。全部 opaque 指针 + C 调用约定，x64 上无 stdcall
@@ -83,6 +85,9 @@ void LogCb(void *, int level, const void *, const char *fmt, va_list args)
 // 运行时定位顺序：dist/vlc/（随包发）→ D:\tools\VLC（本机联调兜底）。
 // 先手动载入 libvlccore：libvlc.dll 的导入表按模块名解析，core 已在内存
 // 就不会再去系统路径找——经典的"同目录私有 DLL"加载法。
+//
+// ⚠️ 只在控制线程调用（内部一堆非线程安全的函数级 static，且 libvlc_new 会
+// 阻塞数秒）。UI 线程要碰的只有它算完之后的 api().load_error。
 bool LoadRuntime()
 {
     Api &a = api();
@@ -166,6 +171,43 @@ bool LoadRuntime()
     return true;
 }
 
+// 起播预热丢帧窗口。见头文件里的现象说明（灰底彩斑烂图）。
+// 1500ms/12 帧：多数 IPC 的 GOP 在 1~2 秒，够等到下一个关键帧把画面刷干净；
+// 再长就影响调焦跟手了。预热期间转圈继续转，工人看到的是"在建联"而不是烂图。
+constexpr int kWarmupMs = 1500;
+constexpr int kWarmupFrames = 12;
+
+// libvlc 控制线程。new/play/stop 全都同步阻塞（首次 libvlc_new 扫插件缓存实测
+// 5-8 秒，player_stop 要等输入线程收尾），放 UI 线程就是"双击 IP 后软件假死"。
+// 全进程共用一条：libvlc 的控制调用本就该串行，多线程反而要自己加锁。
+QObject *controlHub()
+{
+    static QThread *thread = [] {
+        auto *t = new QThread;
+        t->setObjectName(QStringLiteral("vlc-control"));
+        t->start();
+        // 退出前收线程：线程还在跑就卸 DLL 会崩在 libvlc 内部
+        QObject::connect(qApp, &QCoreApplication::aboutToQuit, t, [t] {
+            t->quit();
+            t->wait(3000);
+        });
+        return t;
+    }();
+    static QObject *hub = [] {
+        auto *o = new QObject;
+        o->moveToThread(thread);
+        return o;
+    }();
+    return hub;
+}
+
+template <typename Fn>
+void postToControl(Fn &&fn)
+{
+    QMetaObject::invokeMethod(controlHub(), std::forward<Fn>(fn),
+                              Qt::QueuedConnection);
+}
+
 } // namespace
 
 // ───────────────────────────────── 播放器 ────────────────────────────────────
@@ -173,11 +215,18 @@ bool LoadRuntime()
 VlcStreamPlayer::VlcStreamPlayer(QObject *parent)
     : QObject(parent)
 {
+    // 预热：把插件扫描（首次 libvlc_new，实测 5-8 秒）挪到程序起来时的后台，
+    // 而不是工人双击 IP 的那一刻。页面构造即触发，界面照常可点。
+    postToControl([] { LoadRuntime(); });
 }
 
 VlcStreamPlayer::~VlcStreamPlayer()
 {
-    stop();
+    // 必须**阻塞**等控制线程收完：libvlc 的视频回调把 this 当 opaque 用，
+    // player_stop 返回前回调仍可能在跑（碰 frame_mutex_/sink_）。异步收尾
+    // 等于让回调打在已析构对象上。此处最多等一次 player_stop 的时长。
+    QMetaObject::invokeMethod(controlHub(), [this] { teardownOnControl(); },
+                              Qt::BlockingQueuedConnection);
 }
 
 QVideoSink *VlcStreamPlayer::videoSink() const
@@ -195,6 +244,8 @@ void VlcStreamPlayer::setVideoSink(QVideoSink *sink)
     emit videoSinkChanged();
 }
 
+// UI 线程。**不做任何 libvlc 调用** —— 只更状态、投任务给控制线程后立即返回，
+// 双击 IP 的那一下不再卡住界面（转圈能转起来的前提）。
 void VlcStreamPlayer::setSource(const QString &url)
 {
     if (source_ == url)
@@ -202,54 +253,79 @@ void VlcStreamPlayer::setSource(const QString &url)
     source_ = url;
     emit sourceChanged();
 
-    stop();
+    const int gen = generation_.fetchAndAddOrdered(1) + 1;
+
+    // 本地状态立刻回到"未播"：旧流的 LIVE 徽标不能跨到新流上
+    if (playing_) {
+        playing_ = false;
+        emit playingChanged();
+    }
     error_text_.clear();
     emit errorTextChanged();
-    if (!source_.isEmpty())
-        start();
+    {
+        // 预热计数与"已出图"标记归零 —— 解码线程也读它们，改要持锁
+        QMutexLocker lock(&frame_mutex_);
+        first_frame_seen_ = false;
+        shown_ = false;
+        warmup_frames_left_ = kWarmupFrames;
+    }
+    status_text_ = source_.isEmpty() ? QString() : QStringLiteral("连接中…");
+    emit statusTextChanged();
+
+    const QString target = source_;
+    postToControl([this, gen, target] {
+        teardownOnControl();               // 旧流先收干净（阻塞在控制线程，不碍 UI）
+        if (gen != generation_.loadAcquire())
+            return;                        // 期间又换了源，这一代作废
+        if (!target.isEmpty())
+            startOnControl(gen, target);
+    });
 }
 
-void VlcStreamPlayer::postStatus(const QString &text)
+// 三个 post* 都带代次：投递到 UI 线程时若已换源就丢弃
+void VlcStreamPlayer::postStatus(const int generation, const QString &text)
 {
-    QMetaObject::invokeMethod(this, [this, text]() {
-        if (status_text_ == text)
+    QMetaObject::invokeMethod(this, [this, generation, text]() {
+        if (generation != generation_.loadAcquire() || status_text_ == text)
             return;
         status_text_ = text;
         emit statusTextChanged();
     }, Qt::QueuedConnection);
 }
 
-void VlcStreamPlayer::postError(const QString &text)
+void VlcStreamPlayer::postError(const int generation, const QString &text)
 {
-    QMetaObject::invokeMethod(this, [this, text]() {
+    QMetaObject::invokeMethod(this, [this, generation, text]() {
+        if (generation != generation_.loadAcquire())
+            return;
         error_text_ = text;
         emit errorTextChanged();
     }, Qt::QueuedConnection);
 }
 
-void VlcStreamPlayer::setPlayingQueued(const bool value)
+void VlcStreamPlayer::setPlayingQueued(const int generation, const bool value)
 {
-    QMetaObject::invokeMethod(this, [this, value]() {
-        if (playing_ == value)
+    QMetaObject::invokeMethod(this, [this, generation, value]() {
+        if (generation != generation_.loadAcquire() || playing_ == value)
             return;
         playing_ = value;
         emit playingChanged();
     }, Qt::QueuedConnection);
 }
 
-void VlcStreamPlayer::start()
+// ↓↓↓ 以下两个跑在控制线程：libvlc 的阻塞调用全在这里，UI 线程碰不到 ↓↓↓
+
+void VlcStreamPlayer::startOnControl(const int generation, const QString &url)
 {
     if (!LoadRuntime()) {
-        error_text_ = api().load_error;
-        emit errorTextChanged();
+        postError(generation, api().load_error);
         return;
     }
     Api &a = api();
 
-    media_ = a.media_new_location(a.instance, source_.toUtf8().constData());
+    media_ = a.media_new_location(a.instance, url.toUtf8().constData());
     if (!media_) {
-        error_text_ = QStringLiteral("无法创建媒体: ") + source_;
-        emit errorTextChanged();
+        postError(generation, QStringLiteral("无法创建媒体: ") + url);
         return;
     }
     // 直播低延迟缓冲。RTSP 传输方式保持引擎默认（UDP，与本机 VLC 验证一致）；
@@ -258,14 +334,12 @@ void VlcStreamPlayer::start()
 
     player_ = a.player_new_from_media(media_);
     if (!player_) {
-        error_text_ = QStringLiteral("无法创建播放器");
-        emit errorTextChanged();
+        postError(generation, QStringLiteral("无法创建播放器"));
         a.media_release(media_);
         media_ = nullptr;
         return;
     }
 
-    first_frame_seen_ = false;
     a.video_set_format_callbacks(player_, SetupCb, CleanupCb);
     a.video_set_callbacks(player_, LockCb, UnlockCb, DisplayCb, this);
 
@@ -276,20 +350,22 @@ void VlcStreamPlayer::start()
         }
     }
 
-    status_text_ = QStringLiteral("连接中…");
-    emit statusTextChanged();
+    // 回调侧的代次闸门：play 之前立，回调据此判自己属于哪一代
+    play_generation_.storeRelease(generation);
     if (a.player_play(player_) != 0) {
-        error_text_ = QStringLiteral("启动播放失败: ") +
-            QString::fromUtf8(a.errmsg ? a.errmsg() : "");
-        emit errorTextChanged();
+        postError(generation, QStringLiteral("启动播放失败: ") +
+                                 QString::fromUtf8(a.errmsg ? a.errmsg() : ""));
     }
 }
 
-void VlcStreamPlayer::stop()
+void VlcStreamPlayer::teardownOnControl()
 {
+    // 先作废回调：正在收尾的解码/事件线程读到 -1 就不再往 UI 投状态
+    play_generation_.storeRelease(-1);
+
     Api &a = api();
     if (player_) {
-        a.player_stop(player_);      // 同步：返回后回调不再触发
+        a.player_stop(player_);      // 同步：返回后回调不再触发（可能耗秒级）
         a.player_release(player_);
         player_ = nullptr;
     }
@@ -297,17 +373,9 @@ void VlcStreamPlayer::stop()
         a.media_release(media_);
         media_ = nullptr;
     }
-    {
-        QMutexLocker lock(&frame_mutex_);
-        frame_buffer_.clear();
-        width_ = height_ = 0;
-    }
-    if (playing_) {
-        playing_ = false;
-        emit playingChanged();
-    }
-    status_text_.clear();
-    emit statusTextChanged();
+    QMutexLocker lock(&frame_mutex_);
+    frame_buffer_.clear();
+    width_ = height_ = 0;
 }
 
 // ─────────────────────────── libvlc 线程回调 ────────────────────────────────
@@ -323,6 +391,8 @@ unsigned VlcStreamPlayer::SetupCb(void **opaque, char *chroma, unsigned *width,
     const unsigned h = *height;
 
     QMutexLocker lock(&self->frame_mutex_);
+    // 分辨率协商成功 = 真正开始解码,预热窗口从这里重新起算
+    self->warmup_frames_left_ = kWarmupFrames;
     self->width_ = w;
     self->height_ = h;
     self->pitch_y_ = (w + 31) & ~31u;        // 32 对齐，部分滤镜/拷贝路径更快
@@ -334,7 +404,8 @@ unsigned VlcStreamPlayer::SetupCb(void **opaque, char *chroma, unsigned *width,
     self->frame_buffer_.resize(
         static_cast<std::size_t>(self->pitch_y_) * h +
         static_cast<std::size_t>(self->pitch_uv_) * h);   // uv 两平面各 h/2
-    self->postStatus(QStringLiteral("已协商 %1x%2").arg(w).arg(h));
+    self->postStatus(self->play_generation_.loadAcquire(),
+                     QStringLiteral("已协商 %1x%2").arg(w).arg(h));
     return 1;
 }
 
@@ -366,12 +437,30 @@ void VlcStreamPlayer::DisplayCb(void *opaque, void *)
 {
     auto *self = static_cast<VlcStreamPlayer *>(opaque);
 
+    const int gen = self->play_generation_.loadAcquire();
+
     QMutexLocker lock(&self->frame_mutex_);
     QVideoSink *sink = self->sink_.data();
     if (!sink || self->frame_buffer_.empty())
         return;
     const unsigned w = self->width_;
     const unsigned h = self->height_;
+
+    // ── 预热丢帧：起播头几帧是灰底彩斑的烂图（缺完整 IDR，见头文件），
+    //    这段窗口内一帧不送 sink —— 界面停在转圈上，工人不会看到烂图。
+    if (!self->first_frame_seen_) {
+        self->first_frame_seen_ = true;
+        self->warmup_timer_.start();
+        self->postStatus(gen, QStringLiteral("等待画面稳定…"));
+    }
+    if (self->warmup_frames_left_ > 0) {
+        --self->warmup_frames_left_;
+        return;                      // 拷都不拷，省掉整帧 memcpy
+    }
+    if (self->warmup_timer_.isValid()
+        && self->warmup_timer_.elapsed() < kWarmupMs) {
+        return;                      // 帧数够了但时长没到（低帧率流靠这条兜）
+    }
 
     QVideoFrame frame(QVideoFrameFormat(QSize(static_cast<int>(w),
                                               static_cast<int>(h)),
@@ -400,13 +489,15 @@ void VlcStreamPlayer::DisplayCb(void *opaque, void *)
         }
     }
     frame.unmap();
+    const bool first_shown = !self->shown_;
+    self->shown_ = true;
     lock.unlock();
 
     sink->setVideoFrame(frame);
-    if (!self->first_frame_seen_) {
-        self->first_frame_seen_ = true;
-        self->setPlayingQueued(true);
-        self->postStatus(QStringLiteral("已出图 %1x%2").arg(w).arg(h));
+    // LIVE 徽标/收转圈以"第一帧干净图已送出"为准，不是"连上了"
+    if (first_shown) {
+        self->setPlayingQueued(gen, true);
+        self->postStatus(gen, QStringLiteral("已出图 %1x%2").arg(w).arg(h));
     }
 }
 
@@ -414,23 +505,26 @@ void VlcStreamPlayer::EventCb(const void *event, void *opaque)
 {
     auto *self = static_cast<VlcStreamPlayer *>(opaque);
     const auto *ev = static_cast<const VlcEvent *>(event);
+    const int gen = self->play_generation_.loadAcquire();
+    if (gen < 0)
+        return;                  // 已拆流，收尾中的旧事件不许再改 UI
     switch (ev->type) {
     case kEventPlaying:
-        self->postStatus(QStringLiteral("已连接，等待首帧…"));
+        self->postStatus(gen, QStringLiteral("已连接，等待首帧…"));
         break;
     case kEventBuffering:
-        if (!self->first_frame_seen_)
-            self->postStatus(QStringLiteral("缓冲 %1%")
+        if (!self->shown_)
+            self->postStatus(gen, QStringLiteral("缓冲 %1%")
                                  .arg(static_cast<int>(ev->u.buffering.cache)));
         break;
     case kEventStopped:
     case kEventEndReached:
-        self->setPlayingQueued(false);
-        self->postStatus(QStringLiteral("流已结束"));
+        self->setPlayingQueued(gen, false);
+        self->postStatus(gen, QStringLiteral("流已结束"));
         break;
     case kEventError:
-        self->setPlayingQueued(false);
-        self->postError(QStringLiteral("拉流出错（VLC 引擎报告）"));
+        self->setPlayingQueued(gen, false);
+        self->postError(gen, QStringLiteral("拉流出错（VLC 引擎报告）"));
         break;
     default:
         break;

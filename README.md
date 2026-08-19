@@ -16,12 +16,20 @@ Excel 导出、SQLite 台账。产品 profile 等静态数据仍在 `qml/MockDat
 sh build.sh
 ```
 
-产物 = **`dist/` 整个文件夹**（~112 MB / 1182 文件），拷到任何 Win10/Win11 机器双击
+产物 = **`dist/` 整个文件夹**（~248 MB / 1551 文件，其中 VLC 运行时约 137 MB），
+拷到任何 Win10/Win11 机器双击
 `ProductTestTool.exe` 即可，不需要装 Qt。发布 = dist **内容**直压 zip（无顶层
-文件夹，压后 ~43 MB），放 `package/`（已 gitignore，zip 不进仓库）：
+文件夹，压后 ~90 MB），放 `package/`（已 gitignore，zip 不进仓库）：
 
 ```bash
 cd dist && tar -a -c -f ../package/ProductTestTool_vX.Y.Z_日期.zip *
+```
+
+PowerShell 等价写法（不想开 Git Bash 时用，`*` 同样保证无顶层文件夹）：
+
+```powershell
+sh build.sh                                    # 构建仍需 Git Bash
+Compress-Archive -Path dist\* -DestinationPath package\ProductTestTool_v0.1.8_20260819.zip
 ```
 
 版本号唯一来源 = CMakeLists `project(VERSION)`（exe 版本资源/标题栏/关于页同源），
@@ -135,6 +143,34 @@ python -m aqt install-tool windows desktop tools_ninja     -O C:\Qt
     `main.cpp` 已 `styleHints()->setColorScheme(Qt::ColorScheme::Dark)` 强制
     深色，所有机器走同一分支；新写弹窗不用逐个钉背景，但按钮仍必须走
     `AppButton`（坑 8 不因此失效）。
+
+**拉流（libvlc）：**
+
+15. **libvlc 的 `new`/`play`/`stop` 全是同步阻塞，绝不能在 UI 线程调用。**
+    首次 `libvlc_new` 要扫插件目录建缓存（实测 5-8 秒），`player_stop` 还要等
+    输入线程收尾 —— 现象是"双击 IP 后整个软件假死"，而且**转圈也停着不转**
+    （事件循环被堵，动画不走），比没有转圈更像死机。已改：所有控制调用走
+    专用控制线程（`vlc_stream_player.cpp` 的 `controlHub()`），`setSource()`
+    立即返回、状态经队列信号回主线程；程序启动即后台预热运行时，把插件扫描
+    的代价挪到开机而不是工人双击的那一刻。
+16. **起播头几帧是灰底带彩斑的烂图，必须丢掉再显示。** RTSP over UDP 起会话
+    时首个 IDR 的分片常丢，解码器拿 P 帧硬凑参考帧就是这个样子，要等下一个
+    关键帧才刷干净。产线工人看到会以为镜头脏或机器坏。已改：预热窗口
+    （1500 ms 且 ≥12 帧，低帧率靠时长兜、高帧率靠帧数兜）内一帧不送
+    `QVideoSink`，界面停在转圈上；LIVE 徽标与收转圈都以"第一帧干净图已送出"
+    为准，不是"连上了"。
+17. **全屏不能新开一个播放器实例** —— 那等于第二路拉流，而 `sourceUrl` 没接
+    就是永久黑屏（曾如此）。已改：`LiveFullscreen` 把页面里正在播的
+    `LivePreview` 整体重挂（reparent）到顶层，退出时挂回原位，同一路会话、
+    同一个解码器。页面侧预览必须包一层槽位 `Item`：直接挂在 `ColumnLayout`
+    下时，挂回来会被排到布局末尾。
+18. **全屏用 `PreserveAspectFit`，小窗才用 `PreserveAspectCrop`。** 全屏窗口比
+    视频更宽（1080p 满屏约 1.93 : 视频 1.74），Crop 会从上下裁，正好吃掉顶部
+    OSD 时间戳和底部 Tenda logo 下缘（实测）—— 全屏本就是为看清四角和 OSD，
+    裁边违背目的。另：LIVE 徽标靠**右**上角，左上角是设备烧进画面的时间戳。
+19. 视频圆角要用 `MultiEffect` 遮罩，`clip: true` 只做矩形裁剪 —— Crop 占满后
+    视频的方角会压在 `Rectangle` 的圆角之外。新增 `QtQuick.Effects` 依赖，
+    `windeployqt --qmldir` 会自动收进包（已验证 `dist/qml/QtQuick/Effects`）。
 
 ## 已知待办
 

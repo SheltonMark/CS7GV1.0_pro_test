@@ -1,6 +1,7 @@
 import QtQuick
 import ptest
 import QtQuick.Controls
+import QtQuick.Effects
 import QtMultimedia
 
 // 拉流预览区。
@@ -25,6 +26,10 @@ Rectangle {
     // 准成品/成品工位的小窗上这行字挤在画面里，反而干扰看图。
     property bool showZoomHint: true
 
+    // 全屏托管态：LiveFullscreen 把本组件整体重挂(reparent)到顶层时置 true。
+    // 全屏下去圆角去边框，悬停角标换成"退出"话术。
+    property bool fullscreenHosted: false
+
     // 拉流地址。空串 = 未拉流(占位态);赋值即自动播放,清空即停。
     property string sourceUrl: ""
     readonly property bool streaming: sourceUrl.length > 0
@@ -35,8 +40,8 @@ Rectangle {
     signal fullscreenRequested()
 
     color: "#0B0D10"
-    radius: Theme.radiusLg
-    border.width: 1
+    radius: fullscreenHosted ? 0 : Theme.radiusLg
+    border.width: fullscreenHosted ? 0 : 1
     border.color: Theme.border
     clip: true
 
@@ -64,11 +69,37 @@ Rectangle {
                                  console.log("[stream] " + statusText);
     }
 
-    // 视频层在最底,三分线/LIVE 标记盖在其上
+    // 视频层在最底,三分线/LIVE 标记盖在其上。
+    // 圆角用 MultiEffect 遮罩裁出来 —— Item.clip 只做矩形裁剪,占满后视频
+    // 方角会压出 Rectangle 的圆角外。全屏托管时 radius=0,遮罩自动停用。
+    //
+    // fillMode 分两态(2026-08-19):
+    //   小窗 Crop —— 等比放大占满圆角区,不留黑边,页面观感干净;
+    //     2560x1472(1.74) 对上工位页预览区比例只裁掉个位数百分比。
+    //   全屏 Fit —— **不裁**。全屏的目的就是看清四角暗角、脏点和 OSD,
+    //     而全屏窗口比视频更宽(1080p 满屏约 1.93 : 1.74),Crop 会从上下切,
+    //     正好吃掉顶部 OSD 时间戳和底部 Tenda logo 下缘(实测)。
+    //     两侧留深底不好看,但"画面被切掉一条"是判定失真,不能换。
     VideoOutput {
         id: vout
         anchors.fill: parent
         visible: root.streaming
+        fillMode: root.fullscreenHosted ? VideoOutput.PreserveAspectFit
+                                        : VideoOutput.PreserveAspectCrop
+        layer.enabled: root.streaming && root.radius > 0
+        layer.effect: MultiEffect {
+            maskEnabled: true
+            maskSource: videoMask
+        }
+    }
+
+    // 遮罩形状:与预览区同圆角的实心块,只有 alpha 通道被用到
+    Item {
+        id: videoMask
+        anchors.fill: vout
+        visible: false
+        layer.enabled: true
+        Rectangle { anchors.fill: parent; radius: root.radius; color: "white" }
     }
 
     // 三分法构图辅助线，帮工人把画面对中
@@ -145,11 +176,13 @@ Rectangle {
         }
     }
 
-    // 左上角实时标记(真在播才亮 —— 不播时亮着是撒谎)
+    // 右上角实时标记(真在播才亮 —— 不播时亮着是撒谎)。
+    // 靠右不靠左:设备自己的 OSD 时间戳烧在画面左上角,徽标压上去两行字叠一起,
+    // 而时间戳是产线核对录像时间的依据,不能被遮。
     Row {
         visible: root.playing
-        anchors { left: parent.left; top: parent.top }
-        anchors.leftMargin: root.compact ? Theme.s3 : Theme.s4
+        anchors { right: parent.right; top: parent.top }
+        anchors.rightMargin: root.compact ? Theme.s3 : Theme.s4
         anchors.topMargin: root.compact ? Theme.s3 : Theme.s4
         spacing: Theme.s2
 
@@ -184,12 +217,13 @@ Rectangle {
         onDoubleClicked: root.fullscreenRequested()
     }
 
+    // 悬停角标放左下:右下角是设备烧的 Tenda 水印,叠上去糊成一团
     Text {
-        anchors { right: parent.right; bottom: parent.bottom; margins: Theme.s3 }
-        anchors.rightMargin: Theme.s3
+        anchors { left: parent.left; bottom: parent.bottom }
+        anchors.leftMargin: Theme.s3
         anchors.bottomMargin: Theme.s3
-        visible: hov.containsMouse && root.showZoomHint
-        text: "双击全屏"
+        visible: hov.containsMouse && (root.showZoomHint || root.fullscreenHosted)
+        text: root.fullscreenHosted ? "双击退出全屏" : "双击全屏"
         color: Theme.textDim
         font.family: TypeScale.family
         font.pointSize: TypeScale.caption

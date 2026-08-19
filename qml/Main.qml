@@ -49,7 +49,7 @@ ApplicationWindow {
 
     // 拉流全屏层。必须挂在**窗口根层**（Loader 之外）——
     // 放在工位内容里只能盖住内容区，顶栏和左侧导航栏仍会露出来。
-    // 各页面用 liveFull.open("标题") 唤起：id 在 Main 作用域内对
+    // 各页面用 liveFull.open("标题", 预览项) 唤起：id 在 Main 作用域内对
     // Loader 里的页面同样可见（QML 作用域按词法层级向上查找）。
     LiveFullscreen { id: liveFull }
 

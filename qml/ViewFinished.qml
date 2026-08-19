@@ -525,17 +525,25 @@ Item {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 180 + Theme.s6 + Theme.s4
 
-                LivePreview {
+                // 槽位 Item：全屏是把 livePrev 重挂到 liveFull 的顶层容器，
+                // 槽位留在卡片里占位，退出全屏时挂回来自动填满。
+                Item {
                     anchors {
                         left: parent.left; right: parent.right; bottom: parent.bottom
                     }
                     height: 180
-                    compact: true
-                    showGrid: false
-                    hint: ""
-                    showZoomHint: false
-                    onFullscreenRequested:
-                        liveFull.open((root.semi ? "准成品" : "成品") + " · 实时画面")
+
+                    LivePreview {
+                        id: livePrev
+                        anchors.fill: parent
+                        compact: true
+                        showGrid: false
+                        hint: ""
+                        showZoomHint: false
+                        onFullscreenRequested:
+                            liveFull.open((root.semi ? "准成品" : "成品")
+                                          + " · 实时画面", livePrev)
+                    }
                 }
             }
 

@@ -1,7 +1,10 @@
 #pragma once
 
+#include <QAtomicInteger>
+#include <QElapsedTimer>
 #include <QMutex>
 #include <QObject>
+#include <QPointer>
 #include <QQmlEngine>
 #include <QString>
 #include <QVideoSink>
@@ -26,6 +29,13 @@
 //
 // 视频路径：libvlc 解码（硬解优先，引擎自己协商）→ I420 回调 → QVideoFrame
 // → QVideoSink。QML 侧 VideoOutput 原样保留，LivePreview 只换播放器对象。
+//
+// ⚠️ 线程模型（2026-08-19 修）：libvlc 的 new/play/stop **全部同步阻塞**，
+// 首次 libvlc_new 要扫插件目录建缓存（实测 5-8 秒），放 UI 线程的直接后果是
+// 双击 IP 后整个软件假死 —— 连"拉流建联中"的转圈都停在原地（事件循环被堵，
+// 动画不走）。故所有 libvlc 控制调用移到一条**专用控制线程**：QML 侧
+// setSource() 立即返回，状态经队列信号回主线程，转圈真的在转。
+// 控制线程在程序启动时就预热运行时，把插件扫描的代价挪到开机而非首次拉流。
 class VlcStreamPlayer : public QObject {
     Q_OBJECT
     QML_ELEMENT
@@ -71,17 +81,27 @@ private:
     static void DisplayCb(void *opaque, void *picture);
     static void EventCb(const void *event, void *opaque);
 
-    void start();
-    void stop();
-    void postStatus(const QString &text);
-    void postError(const QString &text);
-    void setPlayingQueued(bool value);
+    // 以下两个跑在控制线程（非 UI）：libvlc 的阻塞调用都关在这里
+    void startOnControl(int generation, const QString &url);
+    void teardownOnControl();
+
+    void postStatus(int generation, const QString &text);
+    void postError(int generation, const QString &text);
+    void setPlayingQueued(int generation, bool value);
 
     QString source_;
     QPointer<QVideoSink> sink_;
     bool playing_ {false};
     QString error_text_;
     QString status_text_;
+
+    // 换流代次。setSource 每次自增 —— 控制线程/解码线程上晚到的旧流回调
+    // 靠它作废（否则"停止后旧流的错误/首帧"会盖掉新流的状态，最坏情况是
+    // 停止后 LIVE 徽标还亮着，即"没画面却说在播"）。
+    // play_generation_：当前真在播的那一代，控制线程 play 前写、回调侧读；
+    // 拆流时先置 -1，正在收尾的旧回调据此自我作废。
+    QAtomicInteger<int> generation_ {0};
+    QAtomicInteger<int> play_generation_ {-1};
 
     // libvlc 对象（void* 持有——无头文件，全部经 QLibrary 解析的 C 接口操作）
     void *media_ {nullptr};
@@ -95,4 +115,14 @@ private:
     unsigned pitch_y_ {0};
     unsigned pitch_uv_ {0};
     bool first_frame_seen_ {false};
+
+    // 起播预热丢帧（都受 frame_mutex_ 保护，解码线程读写、setSource 重置）。
+    // 现象：拉流头几帧是灰底带彩色斑块的烂图（截图实证）—— RTSP over UDP 起
+    // 会话时首个 IDR 的分片常丢，解码器拿 P 帧硬凑参考帧就是这个样子，要等下
+    // 一个关键帧才刷干净。产线工人看到这种图会以为镜头脏或者机器坏。
+    // 处置：预热窗口内的帧一律不送 sink（转圈继续转），窗口 = 满足帧数下限
+    // 且满足时长下限，两者取长 —— 低帧率流靠时长兜、高帧率流靠帧数兜。
+    QElapsedTimer warmup_timer_;
+    int warmup_frames_left_ {0};
+    bool shown_ {false};      // 已送出过至少一帧干净图
 };

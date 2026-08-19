@@ -131,15 +131,22 @@ Item {
             Layout.fillHeight: true
             spacing: Theme.s4
 
-            // 预览区。双击 → 全屏（Main 顶层的 liveFull 层，Esc 退出）。
-            LivePreview {
-                id: preview
+            // 预览区。双击 → 全屏（Main 顶层的 liveFull 层把 preview 重挂过去，
+            // Esc/再双击退出）。外面包一层槽位 Item：若 preview 直接挂在
+            // ColumnLayout 下，全屏挂回来会被排到布局末尾（Layout 按子项
+            // 顺序摆位）；槽位不动，preview 来去都 anchors.fill 当前父项。
+            Item {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                showGrid: true
-                hint: root.rtspMode ? "RTSP 直拉（网口）· 点「搜索设备」或手填 IP"
-                                    : "该产品无网口，拉流走云（XP2P 待接入）"
-                onFullscreenRequested: liveFull.open("调焦 · 实时画面")
+
+                LivePreview {
+                    id: preview
+                    anchors.fill: parent
+                    showGrid: true
+                    hint: root.rtspMode ? "RTSP 直拉（网口）· 点「搜索设备」或手填 IP"
+                                        : "该产品无网口，拉流走云（XP2P 待接入）"
+                    onFullscreenRequested: liveFull.open("调焦 · 实时画面", preview)
+                }
             }
 
             // 发现面板:搜索中或有结果且未拉流时出现;拉流一开就让位 ——
