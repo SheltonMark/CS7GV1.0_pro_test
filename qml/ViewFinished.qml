@@ -170,6 +170,23 @@ Item {
         }
     }
 
+    // 本台在本工位彻底完事 → 自动跳下一台。清掉整条链的状态，否则下一台会带着
+    // 上一台的 chainPhase（显示"流程完成"）和时间戳。
+    function finishAndAdvance() {
+        livePrev.sourceUrl = "";
+        Xp2pClient.stop();
+        chainPhase = "";
+        chainError = "";
+        sentStamp = "";
+        writtenStamp = "";
+        collectedImei = "";
+        recIndex = -1;
+        seqPanel.reset();
+        // stationKey 已在上方定义（semi ? "semi" : "finished"）——
+        // 准成品与成品共用本页，进度分开记
+        Session.advanceStation(root.stationKey);
+    }
+
     Connections {
         target: Xp2pClient
         // ⚠️ 必须按可见性开关。工位页常驻不销毁，而 Xp2pClient 是单例 —— 不加
@@ -301,6 +318,10 @@ Item {
                 toast.show((semi ? "准成品" : "成品") + "流程完成：设备将在 "
                            + FactoryConfig.shutdownDelaySec + " 秒后关机", true);
                 refillMac();   // 本台完结才跳下一条 MAC(入库时刻已不再自动跳)
+                // 自动跳下一台。**必须等到这里**，不能在写完标识就跳：
+                // 后面还有 配置清除 → 定时关机 两步，都用 CloudClient 对当前设备
+                // 下发，提前切走会把这些指令发到下一台去。
+                root.finishAndAdvance();
             } else {
                 chainFail("定时关机下发失败  Code=" + code
                           + (detail.length > 0 ? "  " + detail : ""));
@@ -321,6 +342,12 @@ Item {
         }
         function onInfoUpdated(info) {
             root.devInfo = info;
+            // 顺手用设备真值校正本地进度（顶栏浮层的绿/红点）。零额外调用 ——
+            // 这份上报本来就要读。设备侧时间戳是权威，本地缓存只为重启后不丢。
+            StationProgress.syncFromDevice(
+                CloudClient.productId, CloudClient.deviceName,
+                info.FocusTime || "", info.SemiTime || "",
+                info.FinishTime || "", info.InspectTime || "");
             // ① 写标识回读确认 → 接续自动链
             if (root.sentStamp.length > 0) {
                 const key = root.semi ? "SemiTime" : "FinishTime";

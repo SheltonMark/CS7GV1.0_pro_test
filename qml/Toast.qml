@@ -43,12 +43,16 @@ Rectangle {
     // 轻微上浮，暗示"刚发生"
     transform: Translate { y: root.opacity > 0 ? 0 : 10 }
 
-    function show(text, isOk) {
+    // ms 可选：不给就用默认节奏（成功 2.6s；失败 6s —— 工人得有时间读完并决定
+    // 下一步）。给了就按指定时长，用于"只是告知一下"的短提示（如起播时闪一下
+    // RTSP 地址）。
+    function show(text, isOk, ms) {
         message = text;
         ok = isOk === undefined ? true : isOk;
         opacity = 1;
-        // 失败停 6 秒：工人得有时间读完并决定下一步
-        hideTimer.interval = root.ok ? 2600 : 6000;
+        hideTimer.interval = ms !== undefined && ms > 0
+                             ? ms
+                             : (root.ok ? 2600 : 6000);
         hideTimer.restart();
     }
 

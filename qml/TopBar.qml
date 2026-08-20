@@ -6,6 +6,9 @@ Rectangle {
     id: bar
 
     property string station: ""
+    // 工位 key（focus/semi/finished/…），给设备浮层判"本工位做完没有"。
+    // 与 station 分开：station 是显示用的中文标题，key 才是数据侧的标识。
+    property string stationKey: ""
     // 只有真正的工位页才带"工位"后缀,关于页不是工位
     property bool isStation: true
     property bool online: true
@@ -105,8 +108,26 @@ Rectangle {
             spacing: 1
             anchors.verticalCenter: parent.verticalCenter
 
+            // 本批进度：自动跳台之后工人靠这一行知道"这批还剩几台"。
+            // ⚠️ 依赖 tick 才会重算 —— stationDoneCount 里调的 StationProgress.isDone
+            //    是函数调用，QML 不会因为它内部数据变了就刷新绑定。
             Text {
-                text: "工装卡 · DeviceName"
+                id: progressLabel
+                property int tick: 0
+                Connections {
+                    target: StationProgress
+                    function onChanged() { progressLabel.tick++; }
+                }
+                text: {
+                    if (!bar.isStation || bar.stationKey.length === 0)
+                        return "工装卡 · DeviceName";
+                    const total = CloudClient.devices.length;
+                    if (total === 0)
+                        return "工装卡 · DeviceName";
+                    const done = progressLabel.tick >= 0
+                                 ? Session.stationDoneCount(bar.stationKey) : 0;
+                    return "工装卡 · 本工位 " + done + " / " + total + " 已完成";
+                }
                 color: Theme.textDim
                 font.family: TypeScale.family
                 font.pointSize: TypeScale.caption
@@ -115,6 +136,8 @@ Rectangle {
             }
             DevicePicker {
                 id: picker
+                // 当前工位 key：浮层里的绿/红点表示"这个工位"做完没有
+                station: bar.stationKey
                 onMessage: (text, ok) => bar.deviceMessage(text, ok)
             }
         }

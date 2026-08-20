@@ -35,7 +35,9 @@ qt_add_executable(app_ptest src/main.cpp ${CMAKE_BINARY_DIR}/Application.rc)
 # ⚠️ 带 QML_ELEMENT 的头所在目录都必须单独列进来——注册文件按**文件名**
 # 尖括号查找（<cloud_client.hpp> 而非 <cloud/cloud_client.hpp>），
 # 少列的表现是 "'CloudClient' was not declared in this scope"。
-target_include_directories(app_ptest PRIVATE src src/cloud src/stream)
+# 各子目录都进搜索路径 ⇒ 跨目录 include 用**纯文件名**（如 "stream_log.hpp"），
+# 不写相对路径 —— 全项目已统一此约定，挪目录时不用改 include。
+target_include_directories(app_ptest PRIVATE src src/cloud src/stream src/local)
 
 # qt_add_qml_module 只带进 Qml 依赖；QGuiApplication 来自 Gui、
 # QQuickStyle 来自 QuickControls2，必须显式链，否则连头文件都找不到。
@@ -113,10 +115,15 @@ qt_add_qml_module(app_ptest
         # （现场可截图）也落 dist/logs/（main.cpp 把 stderr 重定向到文件）。
         src/stream/stream_log.hpp
         src/stream/stream_log.cpp
+        # ── src/local/：本地文件读写（不出网，与 cloud/ 相对）────────────────
         # 批次文件读写。QML 无文件写入 API，只把读/写下沉到 C++，
         # 解析与列语义留在 QML（列定义还没和产线定死，改 QML 不必重编 C++）。
-        src/file_io.hpp
-        src/file_io.cpp
+        src/local/file_io.hpp
+        src/local/file_io.cpp
+        # 各工装卡在各工位的完成状态（顶栏设备浮层的绿/红点）。本地存，不增加
+        # 任何云调用 —— 写标识成功那一刻就已知；切设备读上报时顺手与设备真值校正。
+        src/local/station_progress.hpp
+        src/local/station_progress.cpp
         # 云链路层（2026-08-17 起）：CloudClient 是 QML 单例入口，指令串行 +
         # RequestId 闭环；传输可切换（Mock / 腾讯云 API3.0 直连），由 exe 同目录
         # cloud_config.json 决定，密钥文件不进 git。

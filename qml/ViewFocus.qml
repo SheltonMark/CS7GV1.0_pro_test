@@ -34,6 +34,12 @@ Item {
     // 「复制全部」发回来，所以常驻不再是负担。
     readonly property bool showStreamDebug: true
 
+    // 设备 IP 输入框默认藏起来：IP 由设备上报自动带出，工人常态下不需要碰它。
+    // 但**不能删** —— rtspUrl 是从它算出来的，而且设备端没有广播应答服务时
+    // 搜索列表恒空，手填是唯一兜底（见 device_discovery.hpp 头注）。
+    // 点「手填 IP」展开。
+    property bool showIpField: false
+
     property string sentStamp: ""
     property string writtenStamp: ""
     property int writeReqId: -1
@@ -63,13 +69,32 @@ Item {
         writeReqId = CloudClient.writeStage(1, sentStamp);
     }
 
+    // 本工位完事 → 自动跳下一台。切设备前先把本台的画面停掉：云会话有并发名额，
+    // 且下一台要重新建联（RTSP 侧同理，sourceUrl 归空即停）。
+    function finishAndAdvance() {
+        preview.sourceUrl = "";
+        if (root.cloudMode)
+            Xp2pClient.stop();
+        // 判定与标识都清掉，下一台从头来 —— 不清会让"写标识"按钮对着新设备仍是禁用
+        root.imageOk = undefined;
+        root.writtenStamp = "";
+        Session.advanceStation("focus");
+    }
+
     // 双击搜索结果 = 选定该设备:停广播(目的已达成,不再打扰网络)、
     // 填 IP、立即拉流。换台设备时再点搜索,起搜前会 clear 旧列表。
     function pickDevice(ip) {
         finder.stop();
         ipField.text = ip;
-        preview.sourceUrl = "";          // 与「重新拉流」同款:先断再连
+        root.startRtspStream();          // 同一条起播路径，地址也 toast 两秒
+    }
+
+    // RTSP 起播/重来。地址只在这一刻 toast 两秒 —— 排障时要能看到用的是哪个 IP，
+    // 但不值得常驻占一行（工人不看它，看画面）。
+    function startRtspStream() {
+        preview.sourceUrl = "";          // 重拉:先断再连
         preview.sourceUrl = root.rtspUrl;
+        toast.show(root.rtspUrl, true, 2000);
     }
 
     // 云拉流开始/重来:先断旧画面,再让 XP2P 建联。URL 就绪经 onLiveUrlReady
@@ -132,7 +157,17 @@ Item {
                 root.writtenStamp = root.sentStamp;
                 root.sentStamp = "";
                 toast.show("调焦标识已写入并回读确认  " + root.writtenStamp, true);
+                // 调焦没有后续自动链，写标识回读确认即本工位完事 → 自动跳下一台。
+                // 切设备会清掉画面（sourceUrl 归空），工人对下一台重新点开始拉流。
+                root.finishAndAdvance();
             }
+            // 顺手用设备真值校正本地进度（顶栏浮层的绿/红点）。**零额外调用** ——
+            // 这份上报本来就要读。设备侧的三个时间戳才是权威，本地缓存只为重启后
+            // 不丢；两边不一致时以设备为准（本地被删会补回来，本地虚标会被清掉）。
+            StationProgress.syncFromDevice(
+                CloudClient.productId, CloudClient.deviceName,
+                info.FocusTime || "", info.SemiTime || "",
+                info.FinishTime || "", info.InspectTime || "");
         }
         function onCommandFinished(requestId, command, item, code, detail) {
             if (requestId !== root.writeReqId) return;
@@ -234,14 +269,29 @@ Item {
                 }
 
                 // CS7G:设备 IP(上报自动带出,可手改)。URL = 模板.arg(IP)
+                // 默认隐藏（见 showIpField）：常态下 IP 自动带出，摆着只占地方。
+                // ⚠️ 只是 visible=false，不是删掉 —— rtspUrl 依赖它的 text。
                 TextField {
                     id: ipField
-                    visible: root.rtspMode
+                    visible: root.rtspMode && root.showIpField
                     Layout.preferredWidth: 176
                     placeholderText: "设备 IP（自动带出）"
                     enabled: !preview.streaming
                     font.family: "Consolas"
                     font.pointSize: TypeScale.body
+                }
+
+                // 手填 IP 的入口。设备端没有广播应答服务时搜索列表恒空，
+                // 这是唯一兜底，所以入口必须留着。
+                AppButton {
+                    visible: root.rtspMode && !root.showIpField
+                    text: "手填 IP"
+                    glyph: Icons.device
+                    Layout.preferredWidth: 118
+                    onClicked: {
+                        root.showIpField = true;
+                        ipField.forceActiveFocus();
+                    }
                 }
 
                 AppButton {
@@ -257,8 +307,7 @@ Item {
                     Layout.preferredWidth: 158
                     onClicked: {
                         if (root.rtspMode) {
-                            preview.sourceUrl = "";      // 重拉:先断再连
-                            preview.sourceUrl = root.rtspUrl;
+                            root.startRtspStream();
                         } else {
                             root.startCloudStream();
                         }
@@ -275,15 +324,8 @@ Item {
                     }
                 }
 
-                Text {
-                    visible: root.rtspMode && preview.streaming
-                    text: root.rtspUrl
-                    color: Theme.textDim
-                    font.family: "Consolas"
-                    font.pointSize: TypeScale.caption
-                    elide: Text.ElideMiddle
-                    Layout.maximumWidth: 300
-                }
+                // RTSP 地址不再常驻显示 —— 它是排障信息，不是工人要盯的东西，
+                // 摆在按钮行里只是占地方。改成起播时 toast 两秒（见 startRtspStream）。
 
                 // 拉流日志：跟拉流按钮同排，只一个按钮。正文/复制/清空全在模态
                 // 框里 —— **不占预览高度**。早先做成页面里独立一行，把小窗挤矮，

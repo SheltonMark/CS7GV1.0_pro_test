@@ -77,7 +77,14 @@ Item {
 
     Connections {
         target: CloudClient
-        function onInfoUpdated(info) { root.devInfo = info; }
+        function onInfoUpdated(info) {
+            root.devInfo = info;
+            // 顺手校正本地进度（顶栏浮层的绿/红点），零额外云调用
+            StationProgress.syncFromDevice(
+                CloudClient.productId, CloudClient.deviceName,
+                info.FocusTime || "", info.SemiTime || "",
+                info.FinishTime || "", info.InspectTime || "");
+        }
         function onCommandFinished(requestId, command, item, code, detail) {
             if (requestId !== root.inspectReqId) return;
             root.inspectReqId = -1;
@@ -89,6 +96,9 @@ Item {
                 root.done = true;
                 toast.show("检查标识写入成功  " + root.inspectTs, true);
                 CloudClient.refreshInfo();    // 回读刷新 InspectTime
+                // 检查工位没有后续自动链，写标识成功即完事 → 自动跳下一台
+                root.done = false;            // 下一台从"未检查"重新开始
+                Session.advanceStation("inspect");
             } else {
                 toast.show("检查标识写入失败  Code=" + code, false);
             }

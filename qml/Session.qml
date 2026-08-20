@@ -56,6 +56,68 @@ QtObject {
     // 切产品=换会话,批次一起清 —— 跨产品复用批次必然写错身份
     onProfileChanged: { batchName = ""; batchRecords = []; batchUsed = []; batchImei = []; }
 
+    // 某设备在名单（DescribeDevices）里是否在线。给顶栏在切设备后、心跳还没到的
+    // 空档用 —— 那会儿心跳判据还是上一台的，直接显示会是错的。
+    function deviceOnlineInRoster(name) {
+        if (!name || name.length === 0)
+            return false;
+        for (const d of CloudClient.devices)
+            if (d.deviceName === name)
+                return d.online === true;
+        return false;
+    }
+
+    // ── 自动跳下一台 ────────────────────────────────────────────────────
+    // 一批 10 台同时通电，工人按卡号顺序逐台做。本工位标识写成功（回读核对通过）
+    // 即认为这台做完，自动切到下一台，工人不用去点选设备。
+    //
+    // ⚠️ 调用时机必须是"这台在本工位彻底完事"之后，不是"标识写完"之后。准成品/
+    //    成品写完标识还要走 配置清除 → 定时关机 的自动链，链上每一步都用
+    //    CloudClient 对**当前设备**下发 —— 提前切走会把后续指令发到下一台去。
+    //
+    // 返回切过去的设备名；空串 = 没有下一台（都做完了，或剩下的都离线）。
+    signal autoAdvanced(string deviceName)
+    signal autoAdvanceExhausted(string reason)
+
+    function advanceStation(station) {
+        if (!station || station.length === 0)
+            return "";
+        const cur = CloudClient.deviceName;
+        // 先把这台在本工位记成已完成 —— nextPending 要靠它跳过自己
+        StationProgress.setDone(CloudClient.productId, cur, station, true);
+
+        const next = StationProgress.nextPending(CloudClient.productId, station,
+                                                 CloudClient.devices, cur);
+        if (next.length === 0) {
+            // 分清两种"没有下一台"：全做完 vs 剩下的都离线。产线上这两种的处置
+            // 完全不同（一个是收工，一个是去检查供电/工装卡）。
+            let pending = 0;
+            for (const d of CloudClient.devices)
+                if (!StationProgress.isDone(CloudClient.productId, d.deviceName, station))
+                    ++pending;
+            autoAdvanceExhausted(pending > 0
+                ? "还有 " + pending + " 台未测，但都不在线 —— 检查工装卡与供电"
+                : "本批 " + CloudClient.devices.length + " 台在本工位已全部完成");
+            return "";
+        }
+
+        CloudClient.deviceName = next;
+        CloudClient.refreshInfo();   // 顺手拿设备真值校正进度，也刷新页面上的信息
+        autoAdvanced(next);
+        return next;
+    }
+
+    // 本工位已完成台数 / 总台数，给顶栏显示进度
+    function stationDoneCount(station) {
+        if (!station || station.length === 0)
+            return 0;
+        let n = 0;
+        for (const d of CloudClient.devices)
+            if (StationProgress.isDone(CloudClient.productId, d.deviceName, station))
+                ++n;
+        return n;
+    }
+
     function setBatch(name, records) {
         batchName = name;
         batchRecords = records;

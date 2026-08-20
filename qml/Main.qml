@@ -79,10 +79,18 @@ ApplicationWindow {
                 // 关于页恒在末尾 ⇒ 索引 < 工位数即为工位页。
                 station: rail.currentIndex < rail.entries.length
                          ? rail.entries[rail.currentIndex].key : ""
+                // 工位 key（数据侧标识，非中文标题）：设备浮层用它判"本工位做完没"
+                stationKey: rail.currentIndex < rail.stations.length
+                            ? rail.stations[rail.currentIndex].key : ""
                 isStation: rail.currentIndex < rail.stations.length
-                // 在线 = 设备心跳新鲜(CloudClient 按 PtestHeartbeat.LastUpdate 判,
-                // 腾讯云自带的在线状态有延迟不可靠 —— 2026-08-17 需求)
-                online: CloudClient.online
+                // 在线 = 心跳新鲜（CloudClient 按 PtestHeartbeat.LastUpdate 判，
+                // 腾讯云自带的在线状态有延迟不可靠 —— 2026-08-17 需求）。
+                // ⚠️ 但切设备后心跳要等下一拍才准，而名单（DescribeDevices）里已经
+                // 有该设备的在线状态 —— 心跳还没到时先用名单的值，避免刚切过去就
+                // 显示"离线"。心跳一到就以心跳为准（它更实时、也更贴"设备真在跑"）。
+                online: CloudClient.heartbeatAgeMs >= 0
+                        ? CloudClient.online
+                        : Session.deviceOnlineInRoster(CloudClient.deviceName)
                 mismatch: win.mismatch
                 // 顶栏的设备下拉发来的提示（切设备/选到离线设备）
                 onDeviceMessage: (text, ok) => rosterToast.show(text, ok)
@@ -96,8 +104,22 @@ ApplicationWindow {
                 index: rail.currentIndex
             }
 
-            // 名单条的提示（切设备/选到离线设备）。放这一层才能锚到窗口底部。
+            // 设备相关提示（切设备/选到离线设备/自动跳台）。放这一层才能锚到
+            // 窗口底部，也才能跨页面统一 —— 自动跳台是各工位页触发的。
             Toast { id: rosterToast }
+
+            Connections {
+                target: Session
+                // 自动跳台的回执。工人不用点选设备了，但**必须知道现在这台是哪台**
+                // —— 否则会对着屏幕上的设备名去测手上另一台，写错标识。
+                function onAutoAdvanced(deviceName) {
+                    rosterToast.show("已自动切到下一台  " + deviceName, true, 3000);
+                }
+                // 没有下一台：全做完 / 剩下的都离线。两种处置完全不同，文案已分开。
+                function onAutoAdvanceExhausted(reason) {
+                    rosterToast.show(reason, true, 6000);
+                }
+            }
 
             // 切产品 = 换会话,二次确认(规则1)
             Dialog {
@@ -106,6 +128,9 @@ ApplicationWindow {
                 modal: true
                 anchors.centerIn: parent
                 standardButtons: Dialog.Ok | Dialog.Cancel
+                // 不在这里清工位进度：切产品 ≠ 换批次。下一批 10 台是同一个产品、
+                // 同一批卡，工人不会去切产品；反过来切产品时清掉进度，等于把一个
+                // 无关动作变成"悄悄清数据"。清理入口在设备浮层的「开始新批次」。
                 onAccepted: Session.profile = null
 
                 Text {
