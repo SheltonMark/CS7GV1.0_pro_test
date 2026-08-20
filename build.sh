@@ -37,6 +37,23 @@ if [ -f "$DIST/ProductTestTool.exe" ] && ! ( : >> "$DIST/ProductTestTool.exe" ) 
     exit 1
 fi
 
+# ── 现场配置回抄，必须在动 dist 之前 ──────────────────────────────────────
+# dist 里的 cloud_config.json 是产线/联调用的真密钥，不进 git，常常**只存在于
+# dist**。下面确实有"从上一版 dist 抄回来"的逻辑（见 cloud_config 那一段），但它
+# 有个前提：上一版 dist 还在。dist 一旦整个消失（手工删、或替换中途出错），
+# 那份配置就永久丢了 —— 2026-08-20 实际丢过一次，密码只在命令行传过、无处可查。
+#
+# 所以每次构建先把它回抄到仓库根（已 gitignore），两处互为备份。根目录那份本来
+# 就是构建的来源之一，回抄不会引入新语义，只是让它不再是孤本。
+# 只回抄 cloud_config.json：仓库根本来就是它的来源之一，语义一致、且已 gitignore。
+# factory_config.json 不回抄 —— 它的来源是 resources/，回抄到根会造出一个永不被读
+# 的文件，还会变成未跟踪脏文件；丢了只是退回默认勾选，与丢密钥不是一个量级。
+if [ -f "$DIST/cloud_config.json" ] \
+   && ! cmp -s "$DIST/cloud_config.json" "$HERE/cloud_config.json" 2>/dev/null; then
+    cp "$DIST/cloud_config.json" "$HERE/cloud_config.json"
+    echo "[build] 备份现场配置到仓库根: cloud_config.json"
+fi
+
 # CMake 生成期会往 build/qmltypes 写文件但不保证先建目录，
 # 干净构建时会报 "Cannot open file for write"。先建出来。
 mkdir -p "$BUILD/qmltypes"
@@ -111,6 +128,8 @@ cp "$HERE/resources/factory_config.json" "$DIST_WORK/"
 # 保留上一版 dist 的现场配置，优先级最高（2026-08-19 实证：整目录替换把手放
 # 的密钥文件删了，软件静默回落 Mock 假设备——"界面全过实则没连云"最难察觉）。
 #   cloud_config.json    产线密钥（不进 git，常被直接放在 dist）
+#                        ⚠️ 这一步只在"上一版 dist 还在"时管用。dist 整个消失的
+#                        情况由构建开头的"回抄到仓库根"兜住，两者配合才完整。
 #   factory_config.json  管理员在软件里勾选的测试项会写回此文件，重建不能清
 if [ -f "$DIST/cloud_config.json" ]; then
     cp "$DIST/cloud_config.json" "$DIST_WORK/"
