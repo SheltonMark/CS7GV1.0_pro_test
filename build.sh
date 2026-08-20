@@ -248,7 +248,13 @@ done
 trap - EXIT INT TERM          # 从这里起 STAGE 要变成 DIST，别再让 trap 删它
 OLD="$HERE/dist.old.$$"
 rm -rf "$OLD"
-if [ -d "$DIST" ] && mv "$DIST" "$OLD" 2>/dev/null; then
+MV_ERR=""
+if [ -d "$DIST" ]; then
+    MV_ERR=$(mv "$DIST" "$OLD" 2>&1) && MV_OK=1 || MV_OK=0
+else
+    MV_OK=0
+fi
+if [ "$MV_OK" = "1" ]; then
     # 安全路径：旧的已挪到 OLD，出错可回滚
     if ! mv "$STAGE" "$DIST"; then
         echo "[build] FAIL 无法就位 dist，已回滚到上一版" >&2
@@ -266,8 +272,10 @@ elif [ -d "$DIST" ]; then
     #
     # 这一步顺带就是最可靠的占用探测：第 34 行只测 exe，测不到 logs 里的日志，
     # 而且那个检查与这里隔着几十秒的构建时间，中间完全可能有人把程序起起来。
-    echo "[build] FAIL dist 里有文件被占用，无法替换 —— 程序还在运行？" >&2
-    echo "[build]      关掉 dist/ProductTestTool.exe 再构建。" >&2
+    echo "[build] FAIL 无法替换 dist —— 原始错误：" >&2
+    echo "[build]      $MV_ERR" >&2
+    echo "[build]      最常见原因是 dist 里有文件被占用（程序还在运行，或某个 shell" >&2
+    echo "[build]      的工作目录在 dist 里面）。关掉再构建。" >&2
     echo "[build]      旧 dist 未被改动，暂存目录已清理，本次构建无副作用。" >&2
     rm -rf "$STAGE"
     exit 1

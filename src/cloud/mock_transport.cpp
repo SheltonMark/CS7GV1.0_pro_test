@@ -1,6 +1,7 @@
 #include "mock_transport.hpp"
 
 #include <QDateTime>
+#include <QSet>
 #include <QTimer>
 
 #include "crc32.hpp"
@@ -83,6 +84,49 @@ void MockTransport::invokeAction(const QString & /*productId*/, const QString & 
     });
     QTimer::singleShot(kExecuteDelayMs, this, [this, actionId, inputParams]() {
         execute(actionId, inputParams);
+    });
+}
+
+// 假名单。台数/离线号可用环境变量调，方便一台机器上把各种版面都看一遍：
+//   PTEST_MOCK_DEVICES=10   台数
+//   PTEST_MOCK_OFFLINE=3,7  这几号显示离线
+// device_name 照真卡的形状造（10 位数字，从 1000000001 起），这样版面上字宽
+// 与真机一致 —— 用短名字验版面等于没验。
+void MockTransport::buildRoster()
+{
+    int count = qEnvironmentVariableIntValue("PTEST_MOCK_DEVICES");
+    if (count <= 0)
+        count = 10;
+    count = qBound(1, count, 100);
+
+    QSet<int> offline;
+    const QString spec = qEnvironmentVariable("PTEST_MOCK_OFFLINE");
+    for (const QString &part : spec.split(QLatin1Char(','), Qt::SkipEmptyParts)) {
+        bool ok = false;
+        const int n = part.trimmed().toInt(&ok);
+        if (ok)
+            offline.insert(n);
+    }
+
+    roster_ = QJsonArray();
+    for (int i = 1; i <= count; ++i) {
+        roster_.append(QJsonObject{
+            {QStringLiteral("deviceName"),
+             QStringLiteral("10000000%1").arg(i, 2, 10, QLatin1Char('0'))},
+            {QStringLiteral("online"), !offline.contains(i)},
+        });
+    }
+}
+
+void MockTransport::describeDevices(const QString & /*productId*/, CloudReplyHandler done)
+{
+    // ⚠️ 不按 productId 过滤：Mock 只有一套假名单，而且两个产品眼下共用同一个
+    // ProductId（MockData.qml 里 CS6G 暂借 CS7G 的测试产品），过滤了也看不出
+    // 区别。过滤逻辑在 CloudClient/QML 侧，这里只管产出名单。
+    if (roster_.isEmpty())
+        buildRoster();
+    QTimer::singleShot(kReadDelayMs, this, [this, done]() {
+        done(CloudReply::success(QJsonObject{{QStringLiteral("devices"), roster_}}));
     });
 }
 

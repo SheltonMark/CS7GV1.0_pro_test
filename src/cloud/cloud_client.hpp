@@ -40,6 +40,16 @@ class CloudClient : public QObject {
     Q_PROPERTY(int heartbeatValue READ heartbeatValue NOTIFY heartbeatChanged)
     Q_PROPERTY(qint64 heartbeatAgeMs READ heartbeatAgeMs NOTIFY heartbeatChanged)
 
+    // ── 设备名单（多台工装卡同时上线）─────────────────────────────────
+    // 产线一批 10 台，每台一张 SD 工装卡；卡上的 device_name 固定、下一批复用。
+    // 名单来自云端（同一 productId 下的全部设备），**不需要 PC 知道三元组** ——
+    // device_secret 是设备连云用的，PC 走 CAM 密钥直接问云。
+    //
+    // 每项：{ card: 1, deviceName: "1000000001", online: true }
+    // card = 工装卡号，按 deviceName 升序编号（1 起），与卡上贴的标签对应。
+    Q_PROPERTY(QVariantList devices READ devices NOTIFY devicesChanged)
+    Q_PROPERTY(bool devicesLoading READ devicesLoading NOTIFY devicesChanged)
+
 public:
     explicit CloudClient(QObject *parent = nullptr);
 
@@ -52,6 +62,12 @@ public:
     bool online() const { return online_; }
     int heartbeatValue() const { return heartbeatValue_; }
     qint64 heartbeatAgeMs() const;
+    QVariantList devices() const { return devices_; }
+    bool devicesLoading() const { return devicesInFlight_; }
+
+    // 刷新设备名单。productId 取当前值（= 选定产品的 ProductId），所以切产品后
+    // 重新调一次就自动过滤成该产品的设备。
+    Q_INVOKABLE void refreshDevices();
 
     // —— 6 条产测指令。返回本次 RequestId，结果经 commandFinished /
     //    commandTimeout / commandFailed 信号回来（按 RequestId 对应）。
@@ -90,6 +106,7 @@ signals:
     void busyChanged();
     void onlineChanged();
     void heartbeatChanged();
+    void devicesChanged();
     // 调试页日志（已带时间戳前缀）
     void logLine(const QString &line);
     void commandFinished(int requestId, int command, int item, int code,
@@ -119,6 +136,8 @@ private:
     std::unique_ptr<ICloudTransport> transport_;
     QString productId_;
     QString deviceName_;
+    QVariantList devices_;
+    bool devicesInFlight_ {false};
 
     QList<PendingCommand> queue_;
     PendingCommand current_;

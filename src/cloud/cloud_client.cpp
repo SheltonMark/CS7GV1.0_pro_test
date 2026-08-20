@@ -3,6 +3,8 @@
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QFile>
+#include <QHash>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QTime>
 
@@ -132,6 +134,66 @@ void CloudClient::setDeviceName(const QString &value)
     if (deviceName_ == value) return;
     deviceName_ = value;
     emit deviceChanged();
+}
+
+void CloudClient::refreshDevices()
+{
+    if (!transport_ || productId_.isEmpty())
+        return;
+    if (devicesInFlight_)          // 名单刷新可能被多个工位页同时触发，去重
+        return;
+    devicesInFlight_ = true;
+    emit devicesChanged();
+
+    const QString asked = productId_;   // 记住本次问的是哪个产品
+    log(QStringLiteral("→ 读取设备名单 (DescribeDevices) product=%1").arg(asked));
+    transport_->describeDevices(asked, [this, asked](const CloudReply &reply) {
+        devicesInFlight_ = false;
+        // ⚠️ 期间可能已经切了产品（工人换批次），迟到的应答必须丢掉，
+        //    否则名单会是上一个产品的 —— 这就是"按产品过滤"的实现要点：
+        //    过滤不是在结果里挑，而是**只认当前 productId 的那次应答**。
+        if (asked != productId_) {
+            log(QStringLiteral("← 名单应答已过期（产品已切到 %1），丢弃").arg(productId_));
+            emit devicesChanged();
+            return;
+        }
+        if (!reply.ok) {
+            log(QStringLiteral("✗ 读名单失败: ") + reply.error);
+            emit devicesChanged();
+            return;
+        }
+
+        // 按 deviceName 升序编卡号：卡号要稳定，云端返回顺序不保证。
+        QStringList names;
+        QHash<QString, bool> onlineOf;
+        const QJsonArray arr = reply.data.value(QStringLiteral("devices")).toArray();
+        for (const QJsonValue &v : arr) {
+            const QJsonObject d = v.toObject();
+            const QString n = d.value(QStringLiteral("deviceName")).toString();
+            if (n.isEmpty())
+                continue;
+            names.append(n);
+            onlineOf.insert(n, d.value(QStringLiteral("online")).toBool());
+        }
+        names.sort();
+
+        QVariantList out;
+        int card = 1;
+        int onlineCount = 0;
+        for (const QString &n : names) {
+            const bool on = onlineOf.value(n);
+            if (on)
+                ++onlineCount;
+            out.append(QVariantMap{
+                {QStringLiteral("card"), card++},
+                {QStringLiteral("deviceName"), n},
+                {QStringLiteral("online"), on},
+            });
+        }
+        devices_ = out;
+        log(QStringLiteral("← 名单 %1 台，在线 %2 台").arg(names.size()).arg(onlineCount));
+        emit devicesChanged();
+    });
 }
 
 int CloudClient::writeStage(int stage, const QString &timestamp17)

@@ -86,13 +86,28 @@ ApplicationWindow {
                 mismatch: win.mismatch
             }
 
+            // 工装卡名单条。挂在顶层一处 ⇒ 所有工位页零改动就都能选设备，
+            // 也不会每页一份、状态各走各的（详见 DeviceRoster.qml 头注）。
+            // 只在工位页显示：关于页/产品页跟设备无关。
+            DeviceRoster {
+                id: roster
+                visible: rail.currentIndex < rail.stations.length
+                anchors { left: rail.right; right: parent.right; top: bar.bottom }
+                // 提示由这里显示：名单条只有 ~70px 高，装不下 Toast
+                onMessage: (text, ok) => rosterToast.show(text, ok)
+            }
+
             StackLayout_ {
                 anchors {
                     left: rail.right; right: parent.right
-                    top: bar.bottom; bottom: parent.bottom
+                    top: roster.visible ? roster.bottom : bar.bottom
+                    bottom: parent.bottom
                 }
                 index: rail.currentIndex
             }
+
+            // 名单条的提示（切设备/选到离线设备）。放这一层才能锚到窗口底部。
+            Toast { id: rosterToast }
 
             // 切产品 = 换会话,二次确认(规则1)
             Dialog {

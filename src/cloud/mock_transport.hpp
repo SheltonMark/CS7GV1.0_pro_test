@@ -1,7 +1,9 @@
 #pragma once
 
+#include <QJsonArray>
 #include <QJsonObject>
 #include <QObject>
+#include <QStringList>
 
 #include "i_cloud_transport.hpp"
 
@@ -25,6 +27,8 @@ public:
     void readDeviceData(const QString &productId, const QString &deviceName,
                         CloudReplyHandler done) override;
 
+    void describeDevices(const QString &productId, CloudReplyHandler done) override;
+
 private:
     void execute(const QString &actionId, const QJsonObject &p);
     void setResult(int requestId, int command, int item, int code, const QString &detail);
@@ -39,4 +43,13 @@ private:
     QJsonObject lastError_;  // 固定一条"上云失败"样例——真机语义=最近一条非指令类失败，粘滞
     QStringList logLines_;   // ptest.log 尾部；每执行一条指令追加一行
     int logSeq_ {1};         // Text 每变一次自增——QML 靠它决定要不要刷新文本
+
+    // ── 假名单：模拟"10 台工装卡同时上线" ──────────────────────────────
+    // 为什么需要：真云那边名单是真的（10 张卡的 device_name 早就建在控制台上），
+    // 但台面上只有 1 台通电，查出来是"1 在线 + 9 离线"，验不了满载时的版面 ——
+    // 尤其"不许滚动"这条在 10 台全在线时才见真章。
+    // 环境变量 PTEST_MOCK_DEVICES 可覆盖台数（默认 10），
+    // PTEST_MOCK_OFFLINE 指定哪几号离线（逗号分隔，如 "3,7"），用来验混合态。
+    QJsonArray roster_;
+    void buildRoster();
 };

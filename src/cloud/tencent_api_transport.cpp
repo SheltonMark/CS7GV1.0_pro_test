@@ -1,6 +1,7 @@
 #include "tencent_api_transport.hpp"
 
 #include <QDateTime>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QNetworkReply>
 #include <QNetworkRequest>
@@ -102,5 +103,40 @@ void TencentApiTransport::readDeviceData(const QString &productId, const QString
              const QByteArray raw =
                  reply.data.value(QStringLiteral("Data")).toString().toUtf8();
              done(CloudReply::success(QJsonDocument::fromJson(raw).object()));
+         });
+}
+
+void TencentApiTransport::describeDevices(const QString &productId, CloudReplyHandler done)
+{
+    // 产线一次最多十几台工装卡，一页足够。Limit 上限 100（云 API 约定），
+    // 真超了再补分页 —— 现在补等于写不会被执行的代码。
+    const QJsonObject params{
+        {QStringLiteral("ProductId"), productId},
+        {QStringLiteral("Offset"), 0},
+        {QStringLiteral("Limit"), 100},
+    };
+    post(QStringLiteral("DescribeDevices"), params,
+         [done](const CloudReply &reply) {
+             if (!reply.ok) {
+                 done(reply);
+                 return;
+             }
+             // 应答形状：{ "Devices": [ {"DeviceName":…, "Status": 0|1, …} ], "Total": n }
+             // Status 1=在线 0=离线（腾讯 IoT Explorer 约定）。
+             QJsonArray out;
+             const QJsonArray devices =
+                 reply.data.value(QStringLiteral("Devices")).toArray();
+             for (const QJsonValue &v : devices) {
+                 const QJsonObject d = v.toObject();
+                 const QString name = d.value(QStringLiteral("DeviceName")).toString();
+                 if (name.isEmpty())
+                     continue;
+                 out.append(QJsonObject{
+                     {QStringLiteral("deviceName"), name},
+                     {QStringLiteral("online"),
+                      d.value(QStringLiteral("Status")).toInt() == 1},
+                 });
+             }
+             done(CloudReply::success(QJsonObject{{QStringLiteral("devices"), out}}));
          });
 }

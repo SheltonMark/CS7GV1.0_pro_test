@@ -31,6 +31,8 @@ public:
     void readDeviceData(const QString &productId, const QString &deviceName,
                         CloudReplyHandler done) override;
 
+    void describeDevices(const QString &productId, CloudReplyHandler done) override;
+
 private:
     void post(const QString &action, const QJsonObject &params, CloudReplyHandler done);
 

@@ -18,6 +18,10 @@
 //     { "<PropertyId>": {"Value": <值>, "LastUpdate": <ms>}, ... }
 //   与腾讯 DescribeDeviceData 的 Data 字段同构；Mock 也产出同一形状，
 //   这样轮询代码对两种传输一字不改。
+// - describeDevices：列该产品下的设备名单 + 在线状态。data 规格化为
+//     { "devices": [ {"deviceName": "...", "online": true|false}, ... ] }
+//   ⚠️ 在线状态**必须走这个接口**，不要沿用 readDeviceData 那套"读心跳属性再
+//   算年龄"：那是单设备的判据，10 台就要 10 次调用；而这个接口一次返回全部。
 class ICloudTransport {
 public:
     virtual ~ICloudTransport() = default;
@@ -30,4 +34,6 @@ public:
 
     virtual void readDeviceData(const QString &productId, const QString &deviceName,
                                 CloudReplyHandler done) = 0;
+
+    virtual void describeDevices(const QString &productId, CloudReplyHandler done) = 0;
 };
