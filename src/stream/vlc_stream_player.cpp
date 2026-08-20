@@ -1,5 +1,7 @@
 #include "vlc_stream_player.hpp"
 
+#include "stream_log.hpp"
+
 #include <QCoreApplication>
 #include <QDir>
 #include <QLibrary>
@@ -79,7 +81,27 @@ void LogCb(void *, int level, const void *, const char *fmt, va_list args)
         return;
     char line[512];
     std::vsnprintf(line, sizeof(line), fmt, args);
+
+    // 错误级进排障面板（界面可见、可截图）；调试开关下的全量只落日志文件，
+    // 否则 -vv 的量会把面板冲爆。
+    if (level >= 4) {
+        StreamLog::append(QStringLiteral("[vlc] ") + QString::fromUtf8(line));
+        return;
+    }
     std::fprintf(stderr, "[vlc][%d] %s\n", level, line);
+
+    // 例外：解复用器选型与轨道信息即使是 debug 级也送进面板。判"画面出不来"
+    // 全靠这两条 —— 选中了哪个 demux、每条轨道的 fourcc 是什么。量很小
+    // （每次起播几行），不会把面板冲爆。
+    static const char *kKeep[] = {"using demux module", "selected codec",
+                                  "adding track", "Track ID", "es out",
+                                  "codec is not supported", "hevc", "hvc1"};
+    for (const char *k : kKeep) {
+        if (std::strstr(line, k)) {
+            StreamLog::append(QStringLiteral("[vlc·demux] ") + QString::fromUtf8(line));
+            break;
+        }
+    }
 }
 
 // 运行时定位顺序：dist/vlc/（随包发）→ D:\tools\VLC（本机联调兜底）。
@@ -159,8 +181,14 @@ bool LoadRuntime()
         return false;
 
     // 单实例整个进程共用（插件扫描秒级，不能每次拉流都来一遍）
-    const char *args[] = {"--no-video-title-show"};
-    a.instance = a.new_(1, args);
+    //
+    // PTEST_STREAM_DEBUG 下必须同时把 verbosity 提到 -vv：LogCb 只能收到
+    // libvlc 愿意发的等级，光在回调里放行 debug 是收不到东西的。要判定
+    // "选了哪个解复用器、每条轨道的 fourcc 是什么"就靠这一档。
+    const bool debug_all = !qEnvironmentVariableIsEmpty("PTEST_STREAM_DEBUG");
+    const char *args_quiet[] = {"--no-video-title-show"};
+    const char *args_debug[] = {"--no-video-title-show", "-vv"};
+    a.instance = debug_all ? a.new_(2, args_debug) : a.new_(1, args_quiet);
     if (!a.instance) {
         a.load_error = QStringLiteral("libvlc_new 失败: ") +
             QString::fromUtf8(a.errmsg ? a.errmsg() : "");
@@ -328,7 +356,10 @@ void VlcStreamPlayer::setSource(const QString &url)
         warmup_frames_left_ = kWarmupFloorFrames;
         stable_run_ = 0;
         last_hash_valid_ = false;
+        last_logged_buffer_ = -1;
     }
+    if (!source_.isEmpty())
+        StreamLog::append(QStringLiteral("[vlc] 起播 ") + source_);
     status_text_ = source_.isEmpty() ? QString() : QStringLiteral("连接中…");
     emit statusTextChanged();
 
@@ -395,6 +426,23 @@ void VlcStreamPlayer::startOnControl(const int generation, const QString &url)
     // RTSP 传输方式保持引擎默认（UDP，与本机 VLC 验证一致）；若产线网络挡
     // UDP，改这里加 ":rtsp-tcp" 一行即可。
     a.media_add_option(media_, ":network-caching=600");
+
+    // ── 云拉流（本机 http-flv 转发）专属两项，抄参考实现
+    //    （tendasecuritypc BL_TencentLivePlayControl.cpp:357-359 实测可放 H265）。
+    //    只对 http 源加，别动已经调好的 RTSP 路径。
+    //
+    // clock-jitter=0：关掉 input_clock.c 的抖动护栏。设备侧送进 FLV 的音频
+    //   时间戳是**绝对值**（实测 2444148201000），护栏一律判超界并丢弃，报
+    //   "Timestamp conversion failed (delay …, bound 3000000)"，音频又是主
+    //   时钟，于是永久停在缓冲 100%、一帧不出。
+    // clock-synchro=1：让时钟跟着流里的 PCR 走，不自己猜。
+    if (url.startsWith(QStringLiteral("http://"), Qt::CaseInsensitive) ||
+        url.startsWith(QStringLiteral("https://"), Qt::CaseInsensitive)) {
+        a.media_add_option(media_, ":clock-jitter=0");
+        a.media_add_option(media_, ":clock-synchro=1");
+        StreamLog::append(QStringLiteral(
+            "[vlc] 云拉流参数：clock-jitter=0 / clock-synchro=1（容忍设备侧绝对时间戳）"));
+    }
 
     player_ = a.player_new_from_media(media_);
     if (!player_) {
@@ -625,19 +673,29 @@ void VlcStreamPlayer::EventCb(const void *event, void *opaque)
         return;                  // 已拆流，收尾中的旧事件不许再改 UI
     switch (ev->type) {
     case kEventPlaying:
+        StreamLog::append(QStringLiteral("[vlc] 事件 Playing（已连接，等首帧）"));
         self->postStatus(gen, QStringLiteral("已连接，等待首帧…"));
         break;
-    case kEventBuffering:
+    case kEventBuffering: {
+        const int pct = static_cast<int>(ev->u.buffering.cache);
+        // 只记变化点，不然 buffering 事件会把面板刷满。卡 0% 的关键就是
+        // "只有 0%、再没有别的数字"，所以 0 也要记第一次。
+        if (pct != self->last_logged_buffer_) {
+            self->last_logged_buffer_ = pct;
+            StreamLog::append(QStringLiteral("[vlc] 缓冲 %1%").arg(pct));
+        }
         if (!self->shown_)
-            self->postStatus(gen, QStringLiteral("缓冲 %1%")
-                                 .arg(static_cast<int>(ev->u.buffering.cache)));
+            self->postStatus(gen, QStringLiteral("缓冲 %1%").arg(pct));
         break;
+    }
     case kEventStopped:
     case kEventEndReached:
+        StreamLog::append(QStringLiteral("[vlc] 事件 Stopped/EndReached（流结束）"));
         self->setPlayingQueued(gen, false);
         self->postStatus(gen, QStringLiteral("流已结束"));
         break;
     case kEventError:
+        StreamLog::append(QStringLiteral("[vlc] 事件 Error（引擎报错）"));
         self->setPlayingQueued(gen, false);
         self->postError(gen, QStringLiteral("拉流出错（VLC 引擎报告）"));
         break;

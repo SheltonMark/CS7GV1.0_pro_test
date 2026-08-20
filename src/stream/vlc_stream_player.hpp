@@ -132,6 +132,9 @@ private:
     QElapsedTimer warmup_timer_;
     int warmup_frames_left_ {0};
     bool shown_ {false};      // 已送出过至少一帧干净图
+    // 上一次记进排障日志的缓冲百分比。buffering 事件很密，只记变化点。
+    // -1 = 还没记过，保证 0% 也能记下第一次（"只有 0%"本身就是关键证据）。
+    int last_logged_buffer_ {-1};
     // 连续"不平坦且与上一帧不同"的帧数。只认连击、不认单帧：起播灰图上彩斑攒
     // 够了平坦度也会掉下来，单帧判据会被骗过去（实测出图仍是灰的）。
     int stable_run_ {0};

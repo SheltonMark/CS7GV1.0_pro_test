@@ -21,7 +21,10 @@ Rectangle {
 
     property bool showGrid: true       // 三分构图线（调焦要，其它工位不需要）
     property bool compact: false       // 小窗模式：缩小提示文字
-    property string hint: "demo 无真实码流"
+    // 占位态的补充说明，由使用方按场景给（如"点「开始拉流」建联"）。
+    // 默认空：不给就什么都不显示。⚠️ 别在这里写死文案 —— 早先默认值是
+    // "demo 无真实码流"，接了真码流后就成了误导现场的过期提示。
+    property string hint: ""
     // 悬停时的"双击全屏"角标。功能保留，只是不显示提示 ——
     // 准成品/成品工位的小窗上这行字挤在画面里，反而干扰看图。
     property bool showZoomHint: true
@@ -37,7 +40,17 @@ Rectangle {
     readonly property bool playing: player.playing
     property string streamError: ""
 
+    // ── 手动起播（准成品/成品工位用）─────────────────────────────────
+    // 画面中心给一个播放按钮，点了就发 playRequested，由页面去建联。
+    // 调焦工位不用（起播按钮在页面下方那一排），默认关。
+    property bool showPlayButton: false
+    // 外部建联中。⚠️ 必须由页面告知：云拉流是先建联、拿到 URL 才赋 sourceUrl，
+    // 这段时间 streaming 还是假，光看 streaming 会出现"点了按钮什么都没发生"
+    // 的空档（转圈不转、文字不变）。
+    property bool connecting: false
+
     signal fullscreenRequested()
+    signal playRequested()
 
     color: "#0B0D10"
     radius: fullscreenHosted ? 0 : Theme.radiusLg
@@ -131,8 +144,9 @@ Rectangle {
         visible: !root.playing
 
         BusyIndicator {
-            running: root.visible && root.streaming && !root.playing
-                     && root.streamError.length === 0
+            // connecting 也要转：那会儿 sourceUrl 还空着、streaming 为假。
+            running: root.visible && (root.streaming || root.connecting)
+                     && !root.playing && root.streamError.length === 0
             visible: running
             implicitWidth: root.compact ? 28 : 44
             implicitHeight: root.compact ? 28 : 44
@@ -140,7 +154,10 @@ Rectangle {
         }
         Text {
             text: root.streamError.length > 0 ? "拉流失败"
-                  : (root.streaming ? "拉流建联中…" : "未拉流")
+                  : (root.streaming || root.connecting) ? "拉流建联中…"
+                  // 有播放按钮时连"未拉流"都不写 —— 按钮本身已经说清楚了
+                  : (root.showPlayButton ? "" : "未拉流")
+            visible: text.length > 0
             color: root.streamError.length > 0 ? Theme.fail : Theme.textSecondary
             font.family: TypeScale.family
             font.pointSize: root.compact ? TypeScale.caption : TypeScale.body
@@ -228,5 +245,37 @@ Rectangle {
         font.family: TypeScale.family
         font.pointSize: TypeScale.caption
         Behavior on visible { NumberAnimation { duration: Theme.durFast } }
+    }
+
+    // 中心播放按钮 = 开始拉流。
+    // ⚠️ 必须声明在上面那个 hov(MouseArea) **之后**：hov 是 anchors.fill，
+    //    声明在前会把按钮盖住，点下去只会去凑双击全屏的判定。
+    Rectangle {
+        anchors.centerIn: parent
+        width: 56; height: 56; radius: 28
+        visible: root.showPlayButton && !root.streaming
+                 && !root.connecting && !root.playing
+        color: playHit.containsMouse ? Qt.rgba(1, 1, 1, 0.16)
+                                     : Qt.rgba(1, 1, 1, 0.08)
+        border.width: 1
+        border.color: Theme.border
+        Behavior on color { ColorAnimation { duration: Theme.durFast } }
+
+        Icon {
+            anchors.centerIn: parent
+            // 三角形重心偏左，光学居中要往右挪一点
+            anchors.horizontalCenterOffset: 2
+            text: Icons.play
+            size: 24
+            color: Theme.textPrimary
+        }
+
+        MouseArea {
+            id: playHit
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: root.playRequested()
+        }
     }
 }

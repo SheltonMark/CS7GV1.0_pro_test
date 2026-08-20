@@ -122,6 +122,67 @@ else
     echo "[build] WARN: VLC runtime not found ($VLC_RUNTIME) — 拉流将不可用" >&2
 fi
 
+# ── HEVC-in-FLV 解复用：必须是 ffmpeg 6.1+ 的 libavcodec_plugin.dll ───────────
+# 本机 VLC（3.0.x）自带的是 ffmpeg 4.4，FLV 解复用器不认 HEVC，云拉流会
+# "缓冲 100% 但一帧不出"（README 第 28 条）。参考实现 D:\tendasecuritypc 的
+# VLC-Qt 运行时里那份是 ffmpeg 8 静态编译版，ABI 与 3.0.x 兼容（同 vlc_entry
+# 入口、同 66 个 libvlccore 导入符号），直接换文件即可。
+#
+# 这一步**不能只靠"沿用上一版 dist"**：dist 被清掉就会悄悄退回 ffmpeg 4.4，
+# 画面消失且毫无线索。所以每次构建都显式校验版本串，不对就去参考实现取。
+HEVC_PLUGIN_SRC=${HEVC_PLUGIN_SRC:-/d/tendasecuritypc/3rdpart/VLCQT/bin/plugins/codec/libavcodec_plugin.dll}
+VLC_CODEC_DST="$DIST_WORK/vlc/plugins/codec/libavcodec_plugin.dll"
+if [ -f "$VLC_CODEC_DST" ]; then
+    # 判据取"有没有扩展视频标签头解析"（ex_header，E-RTMP/HEVC 那条路），不要按
+    # 版本串判：ffmpeg-8 的二进制里同时含 Lavf57/Lavf62 等多个串，按老版本号
+    # 匹配会永远命中、每次构建白拷 125MB。
+    if ! grep -qa 'ex_header' "$VLC_CODEC_DST" 2>/dev/null; then
+        if [ -f "$HEVC_PLUGIN_SRC" ]; then
+            cp "$HEVC_PLUGIN_SRC" "$VLC_CODEC_DST"
+            echo "[build] vlc  : libavcodec_plugin 换成 ffmpeg-8（HEVC-in-FLV 需要）"
+        else
+            echo "[build] WARN: 缺 ffmpeg-8 版 libavcodec_plugin（$HEVC_PLUGIN_SRC）" >&2
+            echo "[build]       云拉流将卡在'缓冲 100% 不出画面'，见 README 第 28 条" >&2
+        fi
+    fi
+fi
+
+# 云拉流 SDK（腾讯 XP2P，app_interface.dll，约 1.7MB，静态链好依赖、自包含）。
+# 无网口产品（CS6GV2.0）调焦画面走它建联取本机 http-flv URL，见
+# src/stream/xp2p_client.cpp 与 docs/拉流整合方案.md。优先沿用上一版 dist/xp2p/；
+# 没有才从参考工程取，来源可用环境变量 XP2P_RUNTIME 覆盖。缺失只警告不断链——
+# 包照出，云拉流按钮点了提示"SDK 未就绪"，RTSP 产品不受影响。
+XP2P_RUNTIME=${XP2P_RUNTIME:-/d/tendasecuritypc/3rdpart/p2p_sample/lib/windows/x64/Release}
+if [ -f "$DIST/xp2p/app_interface.dll" ]; then
+    mkdir -p "$DIST_WORK/xp2p"
+    cp -r "$DIST/xp2p/." "$DIST_WORK/xp2p/"
+elif [ -f "$XP2P_RUNTIME/app_interface.dll" ]; then
+    mkdir -p "$DIST_WORK/xp2p"
+    cp "$XP2P_RUNTIME/app_interface.dll" "$DIST_WORK/xp2p/"
+    echo "[build] xp2p : bundled from $XP2P_RUNTIME"
+else
+    echo "[build] WARN: XP2P runtime not found ($XP2P_RUNTIME) — 云拉流将不可用" >&2
+fi
+
+# MSVC 运行时兜底：app_interface.dll 链的是 MSVCP140 / VCRUNTIME140[_1]
+#（objdump -p 实证）。产线电脑不一定装了 VC++ 可再发行组件，缺了 LoadLibrary
+# 会失败、云拉流点了就报"SDK 未就绪"。放到与 app_interface.dll **同目录**，靠
+# DLL 搜索顺序兜住，不依赖系统装没装。
+# ⚠️ 这段必须独立于上面的 if/elif —— 沿用上一版 dist/xp2p 那条分支若不补，
+#    第一次带运行时构建出的包，重建后反而会丢掉运行时（实证踩过）。缺就补，
+#    已有不重复拷。
+if [ -f "$DIST_WORK/xp2p/app_interface.dll" ]; then
+    for rt in msvcp140.dll vcruntime140.dll vcruntime140_1.dll; do
+        if [ -f "$DIST_WORK/xp2p/$rt" ]; then
+            continue
+        elif [ -f "/c/Windows/System32/$rt" ]; then
+            cp "/c/Windows/System32/$rt" "$DIST_WORK/xp2p/"
+        else
+            echo "[build] WARN: 缺 MSVC 运行时 $rt — 无 VC++ 组件的产线机云拉流会加载失败" >&2
+        fi
+    done
+fi
+
 # 注意：opengl32sw.dll（约 20MB）是软件 OpenGL 兜底，故意保留。
 # 产线电脑常是低配机/显卡驱动不全/远程桌面登录，缺它会白屏或崩，
 # 省这 20MB 不值得拿停线风险换。

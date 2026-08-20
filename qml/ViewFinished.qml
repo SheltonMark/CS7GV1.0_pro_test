@@ -144,6 +144,52 @@ Item {
         return devInfo[key] !== undefined && devInfo[key] !== "" ? devInfo[key] : "—";
     }
 
+    // ───────────────────── 实时画面（云拉流）─────────────────────────
+    // 这两个工位**一律走云**，不看 profile.focusRtsp：那个开关只描述"调焦工位
+    // 的裸机有网口"这一个场景。到了准成品/成品，壳已经套上，网口被挡住，
+    // CS7GV1.0 和 CS6GV2.0 都只能走云（2026-08-20 与产线确认）。
+    //
+    // 起播时机：**手动**。画面中心一个播放按钮，工人要看才点。
+    // 不自动拉的理由：拉流会占着设备的并发名额（README 第 24 条），而这两站
+    // 大部分时间在跑逐项测试、没人看画面；真出问题要查日志去调焦工位。
+    function startCloudStream() {
+        if (!Xp2pClient.available) {
+            toast.show("云拉流 SDK 未就绪（dist/xp2p/app_interface.dll 缺失）", false);
+            return;
+        }
+        livePrev.sourceUrl = "";
+        Xp2pClient.start(CloudClient.productId, CloudClient.deviceName, "super");
+    }
+
+    onVisibleChanged: {
+        // 只管收尾。切走必须停：不收会占着并发名额，下次拉会被拒
+        //（README 第 24 条）。Xp2pClient 是单例，切到调焦页也靠这一步让出会话。
+        if (!visible) {
+            livePrev.sourceUrl = "";
+            Xp2pClient.stop();
+        }
+    }
+
+    Connections {
+        target: Xp2pClient
+        // ⚠️ 必须按可见性开关。工位页常驻不销毁，而 Xp2pClient 是单例 —— 不加
+        // 这条，本页在后台也会收到别的工位触发的 onLiveUrlReady，于是同一个 URL
+        // 被两个播放器同时打开、两个 HTTP GET 打本机代理，设备只维持一路会话，
+        // 第二个请求进来就把第一个踢掉（实测：刚出图就 StreamEnd）。
+        enabled: root.visible
+        function onLiveUrlReady(url) { livePrev.sourceUrl = url; }
+        function onErrorTextChanged() {
+            if (Xp2pClient.errorText.length > 0) {
+                livePrev.sourceUrl = "";
+                toast.show("云拉流失败: " + Xp2pClient.errorText, false);
+            }
+        }
+        function onStreamEnded(reason) {
+            livePrev.sourceUrl = "";
+            toast.show(reason, false);
+        }
+    }
+
     function nowStamp17() {
         return Qt.formatDateTime(new Date(), "yyyyMMddHHmmsszzz");
     }
@@ -515,35 +561,56 @@ Item {
 
             // 拉流小窗:这两个工位不调焦,但要确认"画面确实出来了"
             //(摄像头虚焊/排线松最容易在这暴露)。双击全屏,Esc 退回。
-            // ⚠️ 尚未接流(sourceUrl 空着是有意的):CS7G 装壳后无网口,网线只有
-            // 调焦工位能接,这里的画面与咪头回传声音都要走 XP2P,SDK 到位后在此
-            // 绑 sourceUrl(PC 侧音频通路已就绪,见 LivePreview 的 audioOutput)。
+            // 走云:装壳后网口被挡,CS7GV1.0 与 CS6GV2.0 都只能走 XP2P。进页面
+            // 自动拉,离开自动停(见上面的 onVisibleChanged / startCloudStream)。
             Card {
                 id: liveCard
                 title: "实时画面"
                 titleIcon: Icons.navFocus
                 Layout.fillWidth: true
-                Layout.preferredHeight: 180 + Theme.s6 + Theme.s4
+                // 高度按各部分显式相加，别再用 180+s6+s4 那种凑出来的数：那样算出
+                // 228px，扣掉上下内距 32 + 标题约 15 + 标题下 12 后内容区只剩约
+                // 169px，而槽位写死 180px 又锚在底部，就往上溢 11px 压到标题上
+                // （现象：「实时画面」和画面贴在一起）。
+                //   内距*2 + 标题 + Card 自带的标题下间距 + 额外间距 + 画面
+                // 多出来的高度由下方「设备信息」卡片自动让出（它是 fillHeight），
+                // 右栏总高不变。
+                readonly property int titleH: 15
+                // Card 的内容区本身已带 topMargin = Theme.s3(12px)，这里再加一点，
+                // 合计 16px —— 这就是你要的"拉开一点距离"。
+                readonly property int extraGap: Theme.s1
+                readonly property int videoH: 180
+                Layout.preferredHeight: Theme.s4 * 2 + titleH + Theme.s3
+                                        + extraGap + videoH
 
                 // 槽位 Item：全屏是把 livePrev 重挂到 liveFull 的顶层容器，
                 // 槽位留在卡片里占位，退出全屏时挂回来自动填满。
+                // ⚠️ 填满内容区而不是写死高度 —— 写死就会跟卡片算出来的内容区打架，
+                //    那正是标题被顶住的原因。
                 Item {
-                    anchors {
-                        left: parent.left; right: parent.right; bottom: parent.bottom
-                    }
-                    height: 180
+                    anchors.fill: parent
+                    anchors.topMargin: liveCard.extraGap
 
                     LivePreview {
                         id: livePrev
                         anchors.fill: parent
                         compact: true
                         showGrid: false
-                        hint: ""
-                        showZoomHint: false
+                        // 小窗不写清楚工人不会想到能放大。用组件自带的悬停角标
+                        // （鼠标移上去才出，不挡画面），不要塞进 hint —— hint 只在
+                        // **没出画面**时显示，那时候提示"双击全屏"正好是反的。
+                        showZoomHint: true
+                        // 手动起播：中心播放按钮 + 建联中转圈，都由组件自己管。
+                        // connecting 必须喂进去，否则点了按钮到拿到 URL 之间
+                        // streaming 仍是假，转圈不转、按钮还在，像是没反应。
+                        showPlayButton: true
+                        connecting: Xp2pClient.connecting
+                        onPlayRequested: root.startCloudStream()
                         onFullscreenRequested:
                             liveFull.open((root.semi ? "准成品" : "成品")
                                           + " · 实时画面", livePrev)
                     }
+
                 }
             }
 

@@ -203,6 +203,165 @@ python -m aqt install-tool windows desktop tools_ninja     -O C:\Qt
     视频的方角会压在 `Rectangle` 的圆角之外。新增 `QtQuick.Effects` 依赖，
     `windeployqt --qmldir` 会自动收进包（已验证 `dist/qml/QtQuick/Effects`）。
 
+**云拉流（XP2P，无网口产品如 CS6GV2.0 的调焦画面）：**
+
+20. **拉流通道按产品分流：带网口（`focusRtsp:true`，CS7GV1.0）走 RTSP 直拉，
+    无网口走云。** 云路径 = 腾讯 XP2P SDK（`dist/xp2p/app_interface.dll`）在本机
+    起一个 http-flv 转发服务，拿到 `http://127.0.0.1:PORT/ipc.flv?...` 的**本机
+    URL**，再交给同一个 `VlcStreamPlayer` 播放 —— 播放层与 XP2P 完全解耦，libvlc
+    的坑（15~19）同样适用。建联序列（`startService` → `setDeviceXp2pInfo` →
+    等 `DetectReady(1004)` → `delegateHttpFlv`）照搬参考实现 `D:\tendasecuritypc`
+    的 `TencentIotMgr` / `p2p_sample`，落在 `src/stream/xp2p_client.cpp`。
+21. **xp2p_info 必须走腾达后台取，绕不开云账号登录。** 曾以为
+    `setDeviceXp2pInfo(id, NULL)` 能让 SDK 自取、从而免掉登录（据此还删掉过一条
+    "等后台授权"的阻塞项），实测是错的 —— 见第 26 条。正路：
+    `/td/td-device-api/se-device/p2pToken/get/v1`，实现在
+    `src/cloud/tenda_cloud_client.cpp`，三段式 check-v2 取主账号与 encrypt_mode
+    → password-login 拿 `access_token` → 带 `Bearer` 取 p2pToken。密码哈希是
+    sha1(用户名) 当 20 字节盐 + 密码按 4 字节对齐补零，5 轮 MD5（前 4 轮喂原始
+    摘要，末轮取 hex），复刻参考实现 `EncryptUtil.cpp:124`。
+    - `cloud_config.json` 的 `tenda.account` / `password` 配好即可，**不用手贴
+      xp2p_info**（2026-08-20 实测：只配账号密码就出图）。`xp2pInfo` 字段保留作
+      临时手段 —— 票据是会话级的、几分钟就变，填了会优先用它。
+    - 业务码 `100012` 报「Header头部信息有误，请检查」其实是**缺 Authorization**，
+      别去查 `sig`（A/B/C curl 对比实证，白查过一轮）。`100410`/`100412` 是
+      token 过期/解析失败，自动重登一次再试。
+    - 账号必须在**安全云**注册过，否则一律 `100421`（`15059242592` 在 cn/sa/eu/us
+      四个区全 `100421`，换测试账号即通）。
+    - `access_token` 与 `xp2p_info` 都是敏感值，日志**只记长度不记值**。
+    - XP2P 的 app_id/app_key 仍是参考实现那对测试凭据，在 `xp2p_client.cpp` 顶部
+      常量，产线定案后挪进 `cloud_config.json`。
+22. **SDK 动态加载（`LoadLibrary`）而非链接导入库。** 纯 C 接口、C ABI 跨编译器
+    兼容，绕开 MSVC `.lib` 与 MinGW 链接不兼容；且 DLL 缺失时 `Xp2pClient.available`
+    为假、按钮点了提示"SDK 未就绪"，不拖垮产测其余工位。就绪等待用异步回调 +
+    `QTimer` 超时（10s），**不用参考实现那种嵌套 `QEventLoop`**（QML 单线程里会
+    重入/假死，方案 §7.1）。
+23. **`app_interface.dll` 链的是 MSVC 运行时**（`MSVCP140`/`VCRUNTIME140[_1]`，
+    `objdump -p` 实证）。产线机不一定装 VC++ 可再发行组件，缺了 `LoadLibrary` 直接
+    失败。`build.sh` 把这三个 DLL 从 `System32` 复制到 `dist/xp2p/`（与
+    `app_interface.dll` 同目录，靠 DLL 搜索顺序兜住），不依赖系统装没装。
+24. **离开工位/切设备/停止都必须 `Xp2pClient.stop()`。** 同一设备的并发拉流有上限
+    （`maxConnectNum`），不收会占着名额，下次拉会 `StreamEnd(1008)` 被拒 —— UI
+    提示"可能被其他工位占用"而不是笼统"失败"（方案 §1.2）。
+25. **云拉流 `quality` 取 `super`（主码流）。** 合法值 `standard`/`high`/`super`
+    （`iv_av_cli_v2.h:69`），但服役实现 `BL_TencentLivePlayControl.cpp:19`
+    `mapLiveQuality()` 只发两个：子码流 `standard`，其余一律 `super`。调焦要看
+    清晰度边界，用主码流。URL 只拼 `action=live&quality=xxx`（对齐
+    `TencentIotMgr::composeLiveUrl`，它连 crypto 都 `Q_UNUSED` 掉），不带
+    `&channel=0&_crypto=off`。
+    注：`quality` 曾被当成"卡 0%"的元凶试了三个值，全都无效 —— 真因见下一条，
+    请求根本没发出去，改它当然没用。后来"缓冲 100% 不出画面"时又怀疑过一轮
+    （想换 `standard` 取子码流避开 H.265），同样是错的方向：`super` 在参考实现里
+    就是主码流的合法取值，且子码流默认也是 H.265（`media_config.hpp:24`），
+    换 quality 躲不开。真因见第 28 条。
+26. **`setDeviceXp2pInfo(id, NULL)` 让 SDK 自取 xp2p_info，在我们这类产品上
+    行不通 —— 两个腾讯平台不是一回事。** 这是云拉流卡「缓冲 0%」的真因，
+    日志实测：
+    ```
+    setDeviceXp2pInfo rc=-1001            # XP2P_ERR_GET_XP2PINFO
+    [requestXP2PInfo]: request xp2p info for 5KHBENFCX2 1000000003
+    [parseXP2PInfo]: no data on response   # 云端返回空
+    [_set_remote_xp2pinfo]: request xp2p_info failed, errmsg:parse reply error
+    [operator ()]: proxy_server_post error:invalid xp2pinfo parameter
+    ```
+    SDK 内置的自取走**物联网视频服务（IoT Video）**，而我们的设备在**物联网
+    开发平台（IoT Explorer）**上（`iotexplorer.tencentcloudapi.com`，产品
+    `5KHBENFCX2`）—— 两个平台产品空间不通，查不到就返回空。参考实现之所以没
+    暴露这个坑：它**从不自取**，总是先从腾达后台拿真 xp2p_info 再
+    `setDeviceXp2pInfo`（`TencentIotMgr.cpp:170-196`，取空即返回），它虽然也调
+    `setQcloudApiCred`，那条自取路径它压根没走过。
+    - **`DetectReady(1004)` 会照常上报 `{"mode":"ready"}`，它只代表本机代理起来
+      了，不代表到设备的链路可用。** 别拿它当"建联成功"的证据 —— 正因为它来了，
+      前面才误判成"隧道没问题，是设备不推流"，白试了三个 `quality`。没有
+      xp2p_info 时代理对每个请求回 `invalid xp2pinfo parameter`，请求根本没出
+      本机，所以既没有 `StreamEnd(1008)` 也没有 `DetectError(1005)`，只有干等。
+    - 结论：xp2p_info 必须由**我们**取到并显式传进去，走 IoT Explorer 的接口
+      （设备侧这个值是 P2P 票据、每次会话变化，与小程序要手填的那个 id 同源）。
+27. **排障日志：程序是 `WIN32_EXECUTABLE`，双击运行时 `stderr` 没有去处。**
+    以前写的 `fprintf(stderr, …)` 在正常使用中**全部丢失**，这是"没有日志可分析"
+    的根因。现在两条出口（`src/stream/stream_log.*`）：
+    - 落盘 `dist/logs/ptest_<时间>.log`（`main.cpp` 的 `InstallFileLog()` 用
+      `freopen` 劫走整个 `stderr`，所以 libvlc 的 `LogCb`、XP2P SDK 的
+      `setLogEnable`、Qt 的 `qDebug` 全都进同一个文件），只留最近 20 个；
+    - 调焦页「拉流日志」（`qml/StreamLogPanel.qml`）：页面上**只有一个按钮**，
+      和「开始拉流」「停止」同排；正文与「复制全部」「清空」全在模态框里，
+      两个动作都有 toast 回执。关掉整块：`ViewFocus.qml` 的
+      `showStreamDebug` 置 false。
+      - ⚠️ **不要把它做成页面里独立的一行。** 曾经如此，把预览挤矮约 30px，而
+        小窗是 `PreserveAspectCrop`，一矮就从上下裁，正好吃掉画面顶部的 OSD
+        时间戳和底部 Tenda logo 下缘（同第 18 条那个坑）。按钮行是工人的主操作
+        区，排障用的东西不该跟它抢位置。
+      - 复制走 C++ 的 `StreamLog::copyToClipboard()`。早先靠一个隐藏 `TextArea`
+        的 `selectAll()+copy()` 代劳，那要求控件常驻存活 —— 正是这个实现细节
+        逼出了"必须占一行"的布局。
+      - 模态框里的 toast 必须放在**弹出层内部**：页面级 `Toast` 在 overlay
+        之下，模态框一开就被压住看不见。
+      - 成品/准成品页**不放**日志入口：那两站画面只是确认"图出来了"，真要查
+        日志去调焦工位。小窗里塞按钮既挡画面又和「双击全屏」角标撞位。
+    `PTEST_STREAM_DEBUG=1` 额外放开 libvlc 全量日志与 XP2P SDK 日志，并启用
+    建联后的 `get_device_st` 探测（阻塞 5s，故默认不开）。**注意 libvlc 的日志
+    等级要在 `libvlc_new` 时用 `-vv` 打开** —— 只在 `LogCb` 里放行 debug 级是
+    收不到的，引擎压根不发。另：解复用器选型与轨道 fourcc 那几行即使是 debug
+    级也会提到面板上（前缀 `[vlc·demux]`），判"画面出不来"全靠它们。
+28. **随包的 VLC 是 ffmpeg 4.4，解不了 HEVC-in-FLV —— 云拉流"缓冲 100% 不出
+    画面"的真因。** 票据灌对、隧道通、心跳正常、缓冲跑满 100%，却一帧不出。
+    判据是 `could not identify codec` / `Unidentified codec`，这是 VLC
+    `decoder.c` 里 `fmt->i_codec == VLC_CODEC_UNKNOWN` 的专属分支 ——
+    **解复用器建出了轨道但给不出 fourcc**，不是缺解码器（`libavcodec_plugin.dll`
+    在，RTSP 的 H.265 就是它软解的）。
+    - 我们这套 VLC 没有 `libflv_plugin.dll`，FLV 靠编进 `libavcodec_plugin.dll`
+      的 avformat 模块解。版本串 `Lavc58.1` / `Lavf58.76.100` = **ffmpeg 4.4**，
+      没有扩展视频标签头解析（`ex_header`、`multitrack` 两个串只在新版二进制里
+      有）。主码流 2560x1472 H.265 进 FLV 走的正是这条路。
+    - 已换成参考实现那份 **ffmpeg 8**（`Lavc62.2` / `Lavf62.12.100`，ffmpeg 静态
+      编进插件、无外部 ffmpeg DLL 依赖 —— 那 128 MB 不是 debug 版）。换之前核过
+      兼容性，不是硬塞：插件 ABI 入口两边同为 `vlc_entry__3_0_0f`；`objdump -p`
+      解 PE 导入表，两份都只从 libvlccore 导入**同样的 66 个符号**，新插件不需要
+      任何 3.0.24 才有的符号。ffmpeg-4 原件留在
+      `dist/vlc/libavcodec_plugin.ffmpeg4.bak`（必须放在 `plugins/` **之外**，
+      否则 VLC 会去探它）。
+    - ⚠️ **这是个隐形依赖**：`build.sh` 优先复用已有 `dist/vlc`，`dist/` 一旦被
+      清掉就悄悄退回 ffmpeg-4，画面再次消失且毫无线索。所以 `build.sh` 每次构建
+      都校验插件里有没有 `ex_header`，缺了就从参考实现取、取不到就告警。
+      2026-08-20 dist 被误删重建时这道校验实际生效了一次，没有它就静默回退。
+      判据用 `ex_header` 而不是版本串：ffmpeg-8 二进制里同时含 `Lavf57`/`Lavf62`
+      等多个串，按老版本号匹配会永远命中、每次构建白拷 125MB。
+    - 代价：dist 从 251 MB 涨到 **357 MB**（那份插件没 strip）。
+    - 另需两个媒体参数（抄参考实现 `BL_TencentLivePlayControl.cpp:357-359`，
+      **只对 http 源加，别动已调好的 RTSP**）：`:clock-jitter=0` 关掉
+      `input_clock.c` 的抖动护栏 —— 设备侧音频送的是**绝对**时间戳（实测
+      `2444148201000`），护栏一律判超界丢弃并报 `Timestamp conversion failed
+      (delay …, bound 3000000)`，而音频是主时钟，于是永久停在 100%；
+      `:clock-synchro=1` 让时钟跟着流里的 PCR 走，不自己猜。
+    - 排查时走过的弯路：先怀疑"打包漏了 flv 插件"（错，参考实现同样没有
+      `libflv_plugin.dll`，插件数同为 47）；又断言"这套 VLC 放不了 H.265"（错，
+      没核对参考实现的 ffmpeg 版本就下结论）。真正的差量只有 ffmpeg 版本。
+29. **成品/准成品的实时画面一律走云，且必须手动起播。** 不看
+    `profile.focusRtsp` —— 那个开关只描述"调焦工位的裸机有网口"这一个场景；到了
+    这两站壳已套上、网口被挡，CS7GV1.0 与 CS6GV2.0 都只能走 XP2P（2026-08-20
+    与产线确认）。
+    - 起播是画面中心的播放按钮（`LivePreview.showPlayButton`），不自动拉：拉流
+      占着设备的并发名额（第 24 条），而这两站大部分时间在跑逐项测试、没人看
+      画面。失败走 toast，然后回到播放按钮。
+    - `LivePreview.connecting` 必须由页面喂 `Xp2pClient.connecting`。云拉流是
+      先建联、拿到 URL 才赋 `sourceUrl`，这段时间 `streaming` 仍是假 —— 不喂
+      这个值，点了按钮到出画面之间转圈不转、按钮还在，像是没反应。
+    - ⚠️ **每个用 `Xp2pClient` 的页面，`Connections` 都必须加
+      `enabled: root.visible`。** 工位页常驻不销毁（`Main.qml` 只切 `visible`），
+      而 `Xp2pClient` 是单例：漏了这条，后台页面照样收到别的工位触发的
+      `onLiveUrlReady`，于是**同一个 URL 被两个播放器同时打开**、两个 HTTP GET
+      打本机代理。设备只维持一路直播会话，第二个请求进来就把第一个踢掉 ——
+      现象是"刚出图就断"，日志里同一 URL 相隔 8ms 打开两次、缓冲/cipher
+      init/nettype 全部成对出现。
+    - 事件 1008 `StreamEnd` 的原因**照抄设备的 msg，别猜**。曾自作聪明写成
+      "设备停止推流，或已达最大连接数（可能被其他工位占用）"，而设备实际说的是
+      `{"mode":"device end stream"}` —— 那句猜测文案把上面那个"两个播放器"的
+      bug 误导成了名额问题，白查一轮。猜测性文案比没有文案更坏。
+    - 卡片高度按各部分显式相加（内距*2 + 标题 + Card 自带间距 + 额外间距 +
+      画面），不要用 `180 + s6 + s4` 那种凑出来的数：那样算出的内容区比槽位写死
+      的 180px 还小 11px，槽位往上溢就把标题顶住了（现象："实时画面"和画面贴在
+      一起）。槽位要 `anchors.fill` 内容区，别写死高度跟卡片算出来的值打架。
+
 ## 已知待办
 
 - 企业微信跳转用 `wxwork://message?username=工号`，能唤醒已登录的企业微信；

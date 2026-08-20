@@ -9,7 +9,8 @@ import QtQuick.Layouts
 //   CS7GV1.0(带网口) → RTSP 直拉。URL 模板在 factory_config.json,IP 来自
 //     设备上报(DeviceInformation.IpAddress,自动带出),也允许手改 —— 产线
 //     网段/静态 IP 变化不用改代码。RTSP 比上云快,调焦跟手。
-//   CS6GV2.0(无网口) → 走云(XP2P),SDK spike 后接入,当前占位提示。
+//   CS6GV2.0(无网口) → 走云: Xp2pClient 建联取本机 http-flv URL 交同一个
+//     LivePreview 播放。设备标识来自 cloud_config.json(经 CloudClient 暴露)。
 // 写调焦标识 = 真实指令闭环:下发(Stage=1) → 回读 FocusTime 核对 → toast。
 Item {
     id: root
@@ -25,6 +26,14 @@ Item {
     readonly property string rtspUrl: ipField.text.trim().length > 0
         ? FactoryConfig.rtspUrlTemplate.arg(ipField.text.trim()) : ""
 
+    // 云拉流模式 = 非 RTSP 产品（无网口，如 CS6GV2.0）。走 XP2P 建联拿本机
+    // http-flv URL，再交给同一个 LivePreview 播放（见 Xp2pClient / 拉流整合方案）。
+    readonly property bool cloudMode: !rtspMode
+
+    // 拉流排障面板开关。默认收起（见 StreamLogPanel），出问题工人点开即可
+    // 「复制全部」发回来，所以常驻不再是负担。
+    readonly property bool showStreamDebug: true
+
     property string sentStamp: ""
     property string writtenStamp: ""
     property int writeReqId: -1
@@ -36,9 +45,10 @@ Item {
     // 页面级实例,非单例 —— 只有调焦工位用,7319 端口仅在搜索期间占用。
     DeviceDiscovery { id: finder }
 
-    // 工位页常驻不销毁(Main 里只切 visible),切走页面必须停广播,
-    // 否则搜索会在后台一直发包
-    onVisibleChanged: if (!visible) finder.stop()
+    // 工位页常驻不销毁(Main 里只切 visible),切走页面必须停广播,否则搜索会
+    // 在后台一直发包;云会话也要收 —— 同一设备并发拉流有上限,不收会占名额
+    // (docs/拉流整合方案.md §1.2)。RTSP 侧由 sourceUrl 清空自理。
+    onVisibleChanged: if (!visible) { finder.stop(); Xp2pClient.stop(); }
 
     function dv(key) {
         return devInfo[key] !== undefined && devInfo[key] !== "" ? devInfo[key] : "—";
@@ -61,6 +71,43 @@ Item {
         preview.sourceUrl = "";          // 与「重新拉流」同款:先断再连
         preview.sourceUrl = root.rtspUrl;
     }
+
+    // 云拉流开始/重来:先断旧画面,再让 XP2P 建联。URL 就绪经 onLiveUrlReady
+    // 回来塞给 preview;失败/断流经 Connections 提示。设备标识来自 cloud_config。
+    function startCloudStream() {
+        preview.sourceUrl = "";
+        // quality=super（主码流）。合法值 standard/high/super，字符串→码流的映射
+        // 在闭源 app_interface.dll 里。**对齐服役的手机 App**：其 mapLiveQuality
+        // 主码流恒返回 "super"（子码流才 "standard"），从不用 "high"。之前照 SDK
+        // 泛用样例试 standard/high 都卡 0%——设备/SDK 这套组合很可能不把 "high"
+        // 路由到在跑的主编码器。super 是参考实现实际在用的值，不是猜。
+        Xp2pClient.start(CloudClient.productId, CloudClient.deviceName, "super");
+    }
+
+    Connections {
+        target: Xp2pClient
+        // ⚠️ 必须按页面可见性开关。工位页常驻不销毁（Main 只切 visible），而
+        // Xp2pClient 是单例 —— 不加这一条，本页在后台也会收到别的工位触发的
+        // onLiveUrlReady，于是**同一个 URL 被两个播放器同时打开**，两个 HTTP GET
+        // 打本机代理。设备只支持一路直播会话，第二个请求进来就把第一个踢掉，
+        // 表现为刚出图就 StreamEnd（实测日志：同一 URL 相隔 8ms 打开两次，
+        // 缓冲/cipher init/nettype 全部成对出现）。
+        enabled: root.visible
+        function onLiveUrlReady(url) {
+            preview.sourceUrl = url;     // 本机 http-flv,libvlc 直接播
+        }
+        function onErrorTextChanged() {
+            if (Xp2pClient.errorText.length > 0) {
+                preview.sourceUrl = "";
+                toast.show("云拉流失败: " + Xp2pClient.errorText, false);
+            }
+        }
+        function onStreamEnded(reason) {
+            preview.sourceUrl = "";
+            toast.show(reason, false);
+        }
+    }
+
 
     Connections {
         target: finder
@@ -143,8 +190,11 @@ Item {
                     id: preview
                     anchors.fill: parent
                     showGrid: true
-                    hint: root.rtspMode ? "RTSP 直拉（网口）· 点「搜索设备」或手填 IP"
-                                        : "该产品无网口，拉流走云（XP2P 待接入）"
+                    hint: root.rtspMode
+                          ? "RTSP 直拉（网口）· 点「搜索设备」或手填 IP"
+                          : (Xp2pClient.available
+                             ? "该产品无网口，拉流走云 · 点「开始拉流」建联"
+                             : "云拉流 SDK 未就绪（dist/xp2p/app_interface.dll 缺失）")
                     onFullscreenRequested: liveFull.open("调焦 · 实时画面", preview)
                 }
             }
@@ -195,22 +245,34 @@ Item {
                 }
 
                 AppButton {
-                    text: preview.streaming ? "重新拉流" : "开始拉流"
+                    // 两种模式共用这颗按钮:RTSP 拼 URL 直连,云走 XP2P 建联。
+                    text: root.cloudMode && Xp2pClient.connecting ? "建联中…"
+                          : (preview.streaming ? "重新拉流" : "开始拉流")
                     glyph: Icons.play
                     kind: "primary"
-                    enabled: root.rtspMode && root.rtspUrl.length > 0
+                    // RTSP:要有 URL。云:SDK 就绪且不在建联中(建联期防连点)。
+                    enabled: root.rtspMode
+                             ? root.rtspUrl.length > 0
+                             : (Xp2pClient.available && !Xp2pClient.connecting)
                     Layout.preferredWidth: 158
                     onClicked: {
-                        preview.sourceUrl = "";          // 重拉:先断再连
-                        preview.sourceUrl = root.rtspUrl;
+                        if (root.rtspMode) {
+                            preview.sourceUrl = "";      // 重拉:先断再连
+                            preview.sourceUrl = root.rtspUrl;
+                        } else {
+                            root.startCloudStream();
+                        }
                     }
                 }
                 AppButton {
                     text: "停止"
                     glyph: Icons.stop
-                    enabled: preview.streaming
+                    enabled: preview.streaming || (root.cloudMode && Xp2pClient.connecting)
                     Layout.preferredWidth: 118
-                    onClicked: preview.sourceUrl = ""
+                    onClicked: {
+                        preview.sourceUrl = "";
+                        if (root.cloudMode) Xp2pClient.stop();
+                    }
                 }
 
                 Text {
@@ -221,6 +283,14 @@ Item {
                     font.pointSize: TypeScale.caption
                     elide: Text.ElideMiddle
                     Layout.maximumWidth: 300
+                }
+
+                // 拉流日志：跟拉流按钮同排，只一个按钮。正文/复制/清空全在模态
+                // 框里 —— **不占预览高度**。早先做成页面里独立一行，把小窗挤矮，
+                // Crop 从上下裁掉了画面顶部时间戳和底部 logo（同 README 第 18 条）。
+                StreamLogPanel {
+                    visible: root.showStreamDebug
+                    Layout.preferredWidth: 150
                 }
 
                 Item { Layout.fillWidth: true }
@@ -323,7 +393,7 @@ Item {
                     steps: [
                         { name: "连接设备 · 读信息",
                           state: root.infoConnected ? 2 : 1 },
-                        { name: root.rtspMode ? "RTSP 拉流调焦" : "云拉流调焦（待接入）",
+                        { name: root.rtspMode ? "RTSP 拉流调焦" : "云拉流调焦",
                           state: preview.playing ? 1
                                  : (root.writtenStamp.length > 0 ? 2 : 0) },
                         { name: "画面判定",

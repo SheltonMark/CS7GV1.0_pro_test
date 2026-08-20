@@ -87,6 +87,7 @@ qt_add_qml_module(app_ptest
         qml/DeviceDiscoveryPanel.qml
         qml/Toast.qml
         qml/LiveFullscreen.qml
+        qml/StreamLogPanel.qml
         # 页面
         qml/ViewFocus.qml
         qml/ViewFinished.qml
@@ -101,6 +102,16 @@ qt_add_qml_module(app_ptest
     SOURCES
         src/stream/vlc_stream_player.hpp
         src/stream/vlc_stream_player.cpp
+        # 云拉流建联（无网口产品如 CS6GV2.0 的调焦画面）：动态加载腾讯 XP2P
+        # SDK（dist/xp2p/app_interface.dll），本机起 http-flv 转发，URL 交给
+        # VlcStreamPlayer 播放。详见 src/stream/xp2p_client.hpp 与 docs/拉流整合方案.md
+        src/stream/xp2p_client.hpp
+        src/stream/xp2p_client.cpp
+        # 拉流排障日志汇聚：程序是 WIN32_EXECUTABLE，双击运行时 stderr 没有
+        # 去处，libvlc/XP2P SDK 的原生输出会全丢。这里统一收口，既上界面
+        # （现场可截图）也落 dist/logs/（main.cpp 把 stderr 重定向到文件）。
+        src/stream/stream_log.hpp
+        src/stream/stream_log.cpp
         # 批次文件读写。QML 无文件写入 API，只把读/写下沉到 C++，
         # 解析与列语义留在 QML（列定义还没和产线定死，改 QML 不必重编 C++）。
         src/file_io.hpp
@@ -117,6 +128,10 @@ qt_add_qml_module(app_ptest
         src/cloud/mock_transport.cpp
         src/cloud/tencent_api_transport.hpp
         src/cloud/tencent_api_transport.cpp
+        # 云拉流的票据来源：腾达后台取 xp2p_info（XP2P SDK 自取那条路走不通，
+        # 详见 src/cloud/tenda_cloud_client.hpp 顶部）
+        src/cloud/tenda_cloud_client.hpp
+        src/cloud/tenda_cloud_client.cpp
         src/cloud/cloud_client.hpp
         src/cloud/cloud_client.cpp
         src/cloud/factory_config.hpp

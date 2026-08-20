@@ -4,5 +4,13 @@
   "secretKey": "",
   "region": "ap-guangzhou",
   "productId": "5KHBENFCX2",
-  "deviceName": "1000000003"
+  "deviceName": "1000000003",
+
+  "_tenda说明": "云拉流（CS6GV2.0 等无网口产品的调焦）取 xp2p_info 用。二选一：填 account/password（腾达安防云账号，软件自动登录取票据，票据每次拉流都变，会自动续），或把腾讯云后台/小程序里那串 xp2pInfo 直接粘到下面先验链路。两个都空则云拉流不可用，按钮会提示缺配置。",
+  "tenda": {
+    "domain": "https://cn-cloud.tenda.com.cn",
+    "account": "",
+    "password": "",
+    "xp2pInfo": ""
+  }
 }
