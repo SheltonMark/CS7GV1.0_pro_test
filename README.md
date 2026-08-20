@@ -361,6 +361,40 @@ python -m aqt install-tool windows desktop tools_ninja     -O C:\Qt
     - 排查时走过的弯路：先怀疑"打包漏了 flv 插件"（错，参考实现同样没有
       `libflv_plugin.dll`，插件数同为 47）；又断言"这套 VLC 放不了 H.265"（错，
       没核对参考实现的 ffmpeg 版本就下结论）。真正的差量只有 ffmpeg 版本。
+30. **多台工装卡：名单来自云端，PC 不需要三元组；选择器必须做成不占高度的下拉。**
+    产线一批 10 台，每台一张 SD 工装卡（卡上 `device_name` 固定、下一批复用）。
+    - `device_secret` 是**设备**连云用的凭据；PC 走 CAM 密钥直接调云 API，只要
+      `product_id` 就能查出该产品下全部设备及在线状态。所以名单不用手工维护，
+      也不必读 SD 卡。接口是 `describeDevices`（真云 = `DescribeDevices`，
+      `Status 1`=在线）。
+    - **在线状态必须走这个接口**，不能沿用 `readDeviceData` 那套"读心跳属性再算
+      年龄"：后者是单设备判据，10 台就要 10 次调用。
+    - 卡号按 `deviceName` 升序编（1 起）—— 云端返回顺序不保证，卡号必须稳定，
+      否则工人手上的卡和屏幕对不上。
+    - **按产品过滤的实现不是"在结果里挑"，而是"只认当前 productId 的那次应答"**：
+      请求时记下 productId，回调里对不上就丢弃。工人切批次时迟到的应答不会污染
+      名单。（眼下两个产品共用同一个 ProductId，CS6G 正式 id 未到，逻辑已就位
+      但验不出区别。）
+    - ⚠️ **选择器不能是占高度的卡片条。** 我先做成 TopBar 下方一条 ~70px 的名单
+      条，立刻又踩了第 18 条那个坑：调焦页 `LivePreview` 是 `PreserveAspectCrop`，
+      可用高度一少就从上下裁，正好吃掉画面顶部 OSD 时间戳和底部 Tenda logo。
+      **这是同一个坑的第三次**（日志面板、名单条各一次）。定案：设备选择做成
+      顶栏里的 `ComboBox`（`DevicePicker.qml`）—— 顶栏本来就占 76px，展开层浮在
+      页面之上不参与布局，零高度成本。
+    - 顶栏原先显示的"设备 SN"是 `MockData.snModel/snSerial`，**demo 期假数据**，
+      与真设备无关。多设备之后工人核对的标识是 `device_name`，已替换。
+    - 下拉里显示**完整** `device_name` 且宽度按最长项撑开（`WidestText`）：核对
+      标识时看半截等于没看。离线项压暗但仍列出 —— 工人需要知道"卡在名单里，
+      只是没上电"，而不是以为卡丢了。
+    - Mock 侧造 10 台假名单（`PTEST_MOCK_DEVICES` / `PTEST_MOCK_OFFLINE` 可调），
+      因为真云那边虽然名单是真的，但台面上只有 1 台通电，验不了满载版面 ——
+      而"不许滚动"这条恰恰只在 10 台全在线时才见真章。假 `device_name` 照真卡
+      形状造 10 位数字：用短名字验版面等于没验。
+    - 云调试页的 `DeviceName` 也换成同一个下拉，另留"手动指定"输入框（调试偶尔
+      要指向名单外的设备）。该页只开放给工程师/管理员 —— `Session.canDebugPanel`
+      **此前定义了却从未被使用**，tech 权限一直能看到这页，已在 `NavRail` 补上门。
+      只控 `visible` 不从 `entries` 去掉：`debugIndex = stations.length + 2` 是按
+      位置算的，抽掉一项会把索引算错。
 29. **成品/准成品的实时画面一律走云，且必须手动起播。** 不看
     `profile.focusRtsp` —— 那个开关只描述"调焦工位的裸机有网口"这一个场景；到了
     这两站壳已套上、网口被挡，CS7GV1.0 与 CS6GV2.0 都只能走 XP2P（2026-08-20

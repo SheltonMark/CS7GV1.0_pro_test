@@ -26,6 +26,9 @@ Item {
         onTriggered: root.clockTick++
     }
 
+    // 切设备/选到离线设备的提示
+    Toast { id: toast }
+
     // ---- 阶段4 日志展示（PtestLastError / PtestLogTail，物模型 v3）----
     // 设备端稍后上报；null = 一次都没收到（旧固件/旧物模型），界面显示"—"。
     // 收到后粘滞——单拍缺键不清空（设备属性本来就是快照式的，缺=没变不是没了）。
@@ -161,6 +164,10 @@ Item {
                         value: CloudClient.productId
                     }
 
+                    // DeviceName 用下拉而不是手填：名单本来就在云端（同一 ProductId
+                    // 下的全部工装卡），手填只会打错。下拉项带在线点，能直接看出
+                    // 哪几张卡没上电。手填入口保留在下面那个"手动指定"里 —— 调试
+                    // 偶尔要指向名单外的设备（新建但还没上电的卡）。
                     RowLayout {
                         Layout.fillWidth: true
                         spacing: Theme.s3
@@ -170,10 +177,32 @@ Item {
                             font.family: TypeScale.family
                             font.pointSize: TypeScale.caption
                         }
+                        DevicePicker {
+                            Layout.fillWidth: true
+                            onMessage: (text, ok) => toast.show(text, ok)
+                        }
+                        AppButton {
+                            text: "刷新名单"
+                            glyph: Icons.reset
+                            implicitHeight: 32
+                            onClicked: CloudClient.refreshDevices()
+                        }
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: Theme.s3
+                        Text {
+                            text: "手动指定"
+                            color: Theme.textDim
+                            font.family: TypeScale.family
+                            font.pointSize: TypeScale.caption
+                        }
                         TextField {
                             id: deviceField
                             Layout.fillWidth: true
                             text: CloudClient.deviceName
+                            placeholderText: "名单外的 DeviceName（调试用）"
                             font.family: "Consolas"
                             font.pointSize: TypeScale.body
                             onEditingFinished: CloudClient.deviceName = text

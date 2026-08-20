@@ -88,7 +88,7 @@ qt_add_qml_module(app_ptest
         qml/Toast.qml
         qml/LiveFullscreen.qml
         qml/StreamLogPanel.qml
-        qml/DeviceRoster.qml
+        qml/DevicePicker.qml
         # 页面
         qml/ViewFocus.qml
         qml/ViewFinished.qml

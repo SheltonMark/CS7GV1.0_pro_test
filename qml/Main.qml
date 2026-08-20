@@ -84,24 +84,14 @@ ApplicationWindow {
                 // 腾讯云自带的在线状态有延迟不可靠 —— 2026-08-17 需求)
                 online: CloudClient.online
                 mismatch: win.mismatch
-            }
-
-            // 工装卡名单条。挂在顶层一处 ⇒ 所有工位页零改动就都能选设备，
-            // 也不会每页一份、状态各走各的（详见 DeviceRoster.qml 头注）。
-            // 只在工位页显示：关于页/产品页跟设备无关。
-            DeviceRoster {
-                id: roster
-                visible: rail.currentIndex < rail.stations.length
-                anchors { left: rail.right; right: parent.right; top: bar.bottom }
-                // 提示由这里显示：名单条只有 ~70px 高，装不下 Toast
-                onMessage: (text, ok) => rosterToast.show(text, ok)
+                // 顶栏的设备下拉发来的提示（切设备/选到离线设备）
+                onDeviceMessage: (text, ok) => rosterToast.show(text, ok)
             }
 
             StackLayout_ {
                 anchors {
                     left: rail.right; right: parent.right
-                    top: roster.visible ? roster.bottom : bar.bottom
-                    bottom: parent.bottom
+                    top: bar.bottom; bottom: parent.bottom
                 }
                 index: rail.currentIndex
             }

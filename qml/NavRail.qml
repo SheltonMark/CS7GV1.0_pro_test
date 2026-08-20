@@ -326,10 +326,15 @@ Rectangle {
         }
 
         // 云链路调试页(联调用)。与批次文件/关于同为非工位页,放底部区。
+        // 只开放给工程师/管理员（Session.canDebugPanel = role !== "tech"）：这页能
+        // 直接下发任意物模型 action、手填 DeviceName，产线操作工不该有这个入口。
+        // ⚠️ 只控 visible、不从 entries 里去掉：debugIndex = stations.length + 2 是
+        //    按位置算的，抽掉一项会把索引算错。
         Item {
             id: debugCell
+            visible: Session.canDebugPanel
             width: parent.width
-            height: 50
+            height: visible ? 50 : 0
 
             readonly property bool active: rail.currentIndex === rail.debugIndex
 

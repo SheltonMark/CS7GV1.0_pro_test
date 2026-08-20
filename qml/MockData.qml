@@ -56,6 +56,10 @@ QtObject {
     // SN = 型号前缀 + 流水号。分隔符只做"显示分组",不进数据 —— 见 snModel/snSerial。
     // 型号前缀跟随会话产品:真实 SN 的型号段本就来自被测机型,写死会让工人
     // 在切到别的产品后看到不匹配的 SN、以为扫错了机器。
+    //
+    // ⚠️ 2026-08-20：顶栏原先用 snModel/snSerial 显示"设备 SN",那是**假数据**,
+    //    与真设备无关。多设备之后顶栏改显示 device_name（工装卡上那串,一卡一台）。
+    //    这三个属性目前无人引用,保留仅因 MockData 整体是假数据集合。
     readonly property string snModel:
         Session.profile ? Session.profile.name : "CS7GV1.0"
     readonly property string snSerial: "2608150042"
