@@ -172,10 +172,68 @@ bool LoadRuntime()
 }
 
 // 起播预热丢帧窗口。见头文件里的现象说明（灰底彩斑烂图）。
-// 1500ms/12 帧：多数 IPC 的 GOP 在 1~2 秒，够等到下一个关键帧把画面刷干净；
-// 再长就影响调焦跟手了。预热期间转圈继续转，工人看到的是"在建联"而不是烂图。
-constexpr int kWarmupMs = 1500;
-constexpr int kWarmupFrames = 12;
+// 口径（2026-08-20 产线反馈定案）：**宁可多转几秒圈，也不许把灰图/卡住的图
+// 放到界面上。** 所以判据只认"正面证据"—— 连续 kStableRun 帧同时满足
+//   ① 不平坦（不是解码器灰底）
+//   ② 与上一帧不同（画面真的在动，不是卡着的一张）
+// 任一帧不合格就把连击数清零重新数。只放行"第一帧碰巧合格"是不够的：起播
+// 灰图上彩斑攒够了也能让平坦度掉下来，单帧判据会被它骗过去（实测仍会灰）。
+constexpr int kWarmupFloorMs = 800;
+constexpr int kWarmupFloorFrames = 12;
+constexpr int kStableRun = 8;
+// 平坦度阈值（百分比）：见 ProbeLuma()。25→10。
+// 为什么 25 还会漏：这个量是"整帧里仍严格平坦的占比"，阈值 25 就等于允许放行时
+// 还有约四分之一的画面是灰底 —— 现象正是"出图带一点灰、随即刷干净"（实测）。
+// 真实画面有传感器噪声，逐位相等占比只有个位数，收到 10 仍有余量。
+constexpr unsigned kFlatPercent = 10;
+
+// ── 上限：真·平坦画面（盖镜头、对白墙、平场标定）永远满足不了上面的判据，
+//    不能让转圈一直转下去。但"放弃等待"不等于"可以放灰图"，所以分两级：
+// 宽限级：放弃连击与"在动"的要求，但仍要求这一帧不是**明显**的灰底。
+//   85% 这条线只有解码器的灰底填充够得着（严格逐位平坦，实测 95%+）；
+//   真实的平坦场景（白墙、过曝天空）有噪声，通常落在 30~60%。
+constexpr int kWarmupCeilMs = 10000;
+constexpr unsigned kFlatRelaxPercent = 85;
+// 死线级：连"不是明显灰底"都等不到（设备没出图/一直烂），无条件放行。
+// 宁可给工人看一张烂图，也不能让转圈无限转下去 —— 那会被当成软件卡死。
+constexpr int kWarmupHardMs = 15000;
+
+// 一次采样同时取两个量，避免为此扫两遍大帧（2560x1472 一遍不便宜）。
+struct LumaProbe {
+    unsigned flat_percent {100};   // "与右邻居逐位相等"的占比，灰底接近 100
+    std::uint32_t hash {0};        // 采样点校验和，用来判两帧是否一样
+};
+
+// 按 8px 稀疏网格采 Y 平面。
+// flat_percent：起播灰底是大片**严格**平坦（逐位相等），真实摄像头画面有传感器
+//   噪声，几乎不可能大面积逐位相等 —— 比判"像不像 128"稳，不依赖解码器填什么值。
+// hash：拿同一批采样点算校验和。相邻两帧 hash 相同 = 画面没动（起播卡住的那张，
+//   或解码器把同一张灰图重复吐出来）。只看 Y 够了：彩斑在 UV，但灰底的判定和
+//   "动没动"的判定都由亮度承载，且 Y 采样最省。
+LumaProbe ProbeLuma(const std::uint8_t *y, const unsigned pitch,
+                    const unsigned w, const unsigned h)
+{
+    LumaProbe p;
+    if (!y || w < 16 || h < 16)
+        return p;                    // 尺寸异常：按"仍是灰底"处理，交给上限兜
+    std::size_t total = 0;
+    std::size_t flat = 0;
+    std::uint32_t hash = 2166136261u;         // FNV-1a 起始值
+    for (unsigned row = 4; row < h; row += 8) {
+        const std::uint8_t *line = y + static_cast<std::size_t>(pitch) * row;
+        for (unsigned x = 0; x + 8 < w; x += 8) {
+            ++total;
+            if (line[x] == line[x + 8])
+                ++flat;
+            hash = (hash ^ line[x]) * 16777619u;
+        }
+    }
+    if (total == 0)
+        return p;
+    p.flat_percent = static_cast<unsigned>(flat * 100 / total);
+    p.hash = hash;
+    return p;
+}
 
 // libvlc 控制线程。new/play/stop 全都同步阻塞（首次 libvlc_new 扫插件缓存实测
 // 5-8 秒，player_stop 要等输入线程收尾），放 UI 线程就是"双击 IP 后软件假死"。
@@ -267,7 +325,9 @@ void VlcStreamPlayer::setSource(const QString &url)
         QMutexLocker lock(&frame_mutex_);
         first_frame_seen_ = false;
         shown_ = false;
-        warmup_frames_left_ = kWarmupFrames;
+        warmup_frames_left_ = kWarmupFloorFrames;
+        stable_run_ = 0;
+        last_hash_valid_ = false;
     }
     status_text_ = source_.isEmpty() ? QString() : QStringLiteral("连接中…");
     emit statusTextChanged();
@@ -328,9 +388,13 @@ void VlcStreamPlayer::startOnControl(const int generation, const QString &url)
         postError(generation, QStringLiteral("无法创建媒体: ") + url);
         return;
     }
-    // 直播低延迟缓冲。RTSP 传输方式保持引擎默认（UDP，与本机 VLC 验证一致）；
-    // 若产线网络挡 UDP，改这里加 ":rtsp-tcp" 一行即可。
-    a.media_add_option(media_, ":network-caching=300");
+    // 直播缓冲。300→600ms：主码流是 2560x1472 H265，集显机软解本就吃紧，
+    // 缓冲太浅时解码赶不上就是"画面一顿一顿"。产线口径是宁可多等也别卡，
+    // 所以这里换成加深缓冲。**代价是操作延迟同步变大**：调焦时手转镜头到
+    // 画面响应会多约 0.3 秒，若调焦嫌不跟手，把这个数调回 300。
+    // RTSP 传输方式保持引擎默认（UDP，与本机 VLC 验证一致）；若产线网络挡
+    // UDP，改这里加 ":rtsp-tcp" 一行即可。
+    a.media_add_option(media_, ":network-caching=600");
 
     player_ = a.player_new_from_media(media_);
     if (!player_) {
@@ -391,8 +455,17 @@ unsigned VlcStreamPlayer::SetupCb(void **opaque, char *chroma, unsigned *width,
     const unsigned h = *height;
 
     QMutexLocker lock(&self->frame_mutex_);
-    // 分辨率协商成功 = 真正开始解码,预热窗口从这里重新起算
-    self->warmup_frames_left_ = kWarmupFrames;
+    // 分辨率协商成功 = 真正开始解码，预热窗口从这里重新起算（含计时器：
+    // 只重置帧数不清 first_frame_seen_ 的话，elapsed() 早已越过窗口，
+    // 时长与上限两道闸门等于失效）。
+    // ⚠️ 仅限"还没出过图"。已经在放的流中途再协商（换码流/分辨率变化）时
+    // 不能重新预热 —— 那会让画面重新卡住数秒，比一两帧花屏难看得多。
+    if (!self->shown_) {
+        self->warmup_frames_left_ = kWarmupFloorFrames;
+        self->first_frame_seen_ = false;
+        self->stable_run_ = 0;
+        self->last_hash_valid_ = false;   // 换了尺寸，旧 hash 不可比
+    }
     self->width_ = w;
     self->height_ = h;
     self->pitch_y_ = (w + 31) & ~31u;        // 32 对齐，部分滤镜/拷贝路径更快
@@ -448,18 +521,48 @@ void VlcStreamPlayer::DisplayCb(void *opaque, void *)
 
     // ── 预热丢帧：起播头几帧是灰底彩斑的烂图（缺完整 IDR，见头文件），
     //    这段窗口内一帧不送 sink —— 界面停在转圈上，工人不会看到烂图。
-    if (!self->first_frame_seen_) {
-        self->first_frame_seen_ = true;
-        self->warmup_timer_.start();
-        self->postStatus(gen, QStringLiteral("等待画面稳定…"));
-    }
-    if (self->warmup_frames_left_ > 0) {
-        --self->warmup_frames_left_;
-        return;                      // 拷都不拷，省掉整帧 memcpy
-    }
-    if (self->warmup_timer_.isValid()
-        && self->warmup_timer_.elapsed() < kWarmupMs) {
-        return;                      // 帧数够了但时长没到（低帧率流靠这条兜）
+    // ⚠️ 整段**只在"还没出过图"时生效**（`!shown_`）。出图之后必须无条件放行
+    //    每一帧：否则判据会继续拦掉后面的帧，画面就卡在第一张不动（实测卡
+    //    8~10 秒），而且到上限那一刻又正好把一张灰图放出去 —— "第一帧清晰但
+    //    卡住、中途还灰一次"就是这么来的。预热是**起播一次性**的闸门，
+    //    不是常驻滤镜。
+    if (!self->shown_) {
+        if (!self->first_frame_seen_) {
+            self->first_frame_seen_ = true;
+            self->warmup_timer_.start();
+            self->postStatus(gen, QStringLiteral("等待画面稳定…"));
+        }
+        const qint64 waited =
+            self->warmup_timer_.isValid() ? self->warmup_timer_.elapsed() : 0;
+        if (self->warmup_frames_left_ > 0) {
+            --self->warmup_frames_left_;
+            return;                  // 拷都不拷，省掉整帧 memcpy
+        }
+        if (waited < kWarmupFloorMs)
+            return;                  // 帧数够了但时长没到（低帧率流靠这条兜）
+
+        // 正面证据：这一帧既不平坦、又和上一帧不同，才算一次合格连击。
+        const LumaProbe probe =
+            ProbeLuma(self->frame_buffer_.data(), self->pitch_y_, w, h);
+        const bool clean = probe.flat_percent < kFlatPercent;
+        const bool moving = self->last_hash_valid_ && probe.hash != self->last_hash_;
+        self->last_hash_ = probe.hash;
+        self->last_hash_valid_ = true;
+        self->stable_run_ = (clean && moving) ? self->stable_run_ + 1 : 0;
+
+        // 三级放行。等不到理想画面时逐级让步，但"放弃等待"不等于"可以放灰图"：
+        // 宽限级仍拦住明显灰底，只有死线级才无条件放行。
+        if (self->stable_run_ >= kStableRun) {
+            self->release_reason_ = "stable run";
+        } else if (waited >= kWarmupHardMs) {
+            self->release_reason_ = "HARD DEADLINE - 始终没等到干净图";
+        } else if (waited >= kWarmupCeilMs
+                   && probe.flat_percent < kFlatRelaxPercent) {
+            self->release_reason_ = "ceiling (relaxed)";
+        } else {
+            return;                  // 继续丢
+        }
+        self->release_flat_percent_ = probe.flat_percent;
     }
 
     QVideoFrame frame(QVideoFrameFormat(QSize(static_cast<int>(w),
@@ -490,6 +593,13 @@ void VlcStreamPlayer::DisplayCb(void *opaque, void *)
     }
     frame.unmap();
     const bool first_shown = !self->shown_;
+    // 预热实际耗时：调 kFlatPercent / kWarmupCeilMs 就看这个数。接近上限说明
+    // 是被上限强放的（判据没等到干净图，可能判得太严或该设备 GOP 特别长）。
+    const qint64 warmup_ms = first_shown && self->warmup_timer_.isValid()
+        ? self->warmup_timer_.elapsed() : 0;
+    // 连同放行原因一起在锁内取走：日志在 unlock 之后打，不能再碰成员
+    const char *release_reason = self->release_reason_;
+    const unsigned release_flat = self->release_flat_percent_;
     self->shown_ = true;
     lock.unlock();
 
@@ -498,6 +608,11 @@ void VlcStreamPlayer::DisplayCb(void *opaque, void *)
     if (first_shown) {
         self->setPlayingQueued(gen, true);
         self->postStatus(gen, QStringLiteral("已出图 %1x%2").arg(w).arg(h));
+        std::fprintf(stderr,
+                     "[vlc] first frame %ux%u after %lldms warmup"
+                     " (%s, flat=%u%%)\n",
+                     w, h, static_cast<long long>(warmup_ms),
+                     release_reason, release_flat);
     }
 }
 
