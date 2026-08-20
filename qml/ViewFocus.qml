@@ -78,6 +78,11 @@ Item {
         // 判定与标识都清掉，下一台从头来 —— 不清会让"写标识"按钮对着新设备仍是禁用
         root.imageOk = undefined;
         root.writtenStamp = "";
+        root.sentStamp = "";
+        // ⚠️ 旧搜索结果也要清。发现面板的显示条件里有 `!preview.streaming`，
+        //    上面刚把 sourceUrl 清空，上一轮的搜索结果会立刻又冒出来 —— 看着像
+        //    "自动跳台顺带重新搜索了一遍"，其实是残留列表（实测踩过）。
+        finder.clear();
         Session.advanceStation("focus");
     }
 

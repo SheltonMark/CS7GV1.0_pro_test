@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QHash>
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QObject>
@@ -33,6 +34,29 @@ private:
     void execute(const QString &actionId, const QJsonObject &p);
     void setResult(int requestId, int command, int item, int code, const QString &detail);
     static QString nowStamp17();
+
+    // 假设备状态（字段名与物模型 ProductTestInfo / ProductTestResult 一致）
+    // ⚠️ 假设备状态要**按 deviceName 隔离**。
+    //    早先只有一份 info_/result_ 且把 deviceName 参数整个忽略掉，十台假设备
+    //    共用同一份 —— 在 01 号写完调焦标识后切到 02 号，读上报拿到的还是那份带
+    //    FocusTime 的数据，于是 02 号也被判成"本工位已完成"：绿点误亮，自动跳台
+    //    也因为"全都做完了"而不动。多设备一上来就暴露了这个假设。
+    //
+    //    做法是"换入换出"而不是把 info_ 改成 map：execute()/setResult() 等内部
+    //    函数全都直接操作 info_/result_/logLines_，改成 map 要动一大片、容易引入
+    //    新错。入口处按 deviceName 切换：与上次不同就先把当前状态存回 saved_，
+    //    再把目标设备的状态取出来 —— 内部函数一行不用改。
+    struct DeviceState {
+        QJsonObject info;
+        QJsonObject result;
+        bool hasResult {false};
+        int heartbeat {0};
+        QStringList logLines;
+        int logSeq {1};
+    };
+    QHash<QString, DeviceState> saved_;
+    QString current_;
+    void switchTo(const QString &deviceName);
 
     // 假设备状态（字段名与物模型 ProductTestInfo / ProductTestResult 一致）
     QJsonObject info_;

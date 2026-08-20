@@ -74,7 +74,7 @@ MockTransport::MockTransport(QObject *parent)
     };
 }
 
-void MockTransport::invokeAction(const QString & /*productId*/, const QString & /*deviceName*/,
+void MockTransport::invokeAction(const QString & /*productId*/, const QString &deviceName,
                                  const QString &actionId, const QJsonObject &inputParams,
                                  CloudReplyHandler done)
 {
@@ -82,7 +82,12 @@ void MockTransport::invokeAction(const QString & /*productId*/, const QString & 
         done(CloudReply::success(
             QJsonObject{{QStringLiteral("ClientToken"), QStringLiteral("mock-token")}}));
     });
-    QTimer::singleShot(kExecuteDelayMs, this, [this, actionId, inputParams]() {
+    // ⚠️ deviceName 必须带进 lambda 并在**执行时**再切：受理到执行之间有 650ms，
+    //    这期间工人完全可能已经切到别的设备（自动跳台更是必然）。用 current_ 会把
+    //    这条指令的效果写到错误的那台上。
+    QTimer::singleShot(kExecuteDelayMs, this,
+                       [this, deviceName, actionId, inputParams]() {
+        switchTo(deviceName);
         execute(actionId, inputParams);
     });
 }
@@ -118,6 +123,48 @@ void MockTransport::buildRoster()
     }
 }
 
+// 把当前状态存回 saved_，再换入目标设备的状态。第一次见到某台设备时按"出厂态"
+// 建一份：四个时间戳为空、无结果槽 —— 也就是"什么都还没测"。这正是真实产线上
+// 一批新机器的样子，自动跳台/绿点全靠它才有意义。
+void MockTransport::switchTo(const QString &deviceName)
+{
+    if (deviceName == current_)
+        return;
+
+    if (!current_.isEmpty()) {
+        DeviceState s;
+        s.info = info_;
+        s.result = result_;
+        s.hasResult = hasResult_;
+        s.heartbeat = heartbeat_;
+        s.logLines = logLines_;
+        s.logSeq = logSeq_;
+        saved_.insert(current_, s);
+    }
+
+    current_ = deviceName;
+
+    const auto it = saved_.constFind(deviceName);
+    if (it != saved_.constEnd()) {
+        info_ = it->info;
+        result_ = it->result;
+        hasResult_ = it->hasResult;
+        heartbeat_ = it->heartbeat;
+        logLines_ = it->logLines;
+        logSeq_ = it->logSeq;
+        return;
+    }
+
+    // 出厂态：把四个时间戳清空，其余（SupportedItems 等能力位）沿用构造时的模板
+    for (const char *k : {"FocusTime", "SemiTime", "FinishTime", "InspectTime"})
+        info_.insert(QLatin1String(k), QString());
+    result_ = QJsonObject();
+    hasResult_ = false;
+    heartbeat_ = 0;
+    logLines_.clear();
+    logSeq_ = 1;
+}
+
 void MockTransport::describeDevices(const QString & /*productId*/, CloudReplyHandler done)
 {
     // ⚠️ 不按 productId 过滤：Mock 只有一套假名单，而且两个产品眼下共用同一个
@@ -130,9 +177,10 @@ void MockTransport::describeDevices(const QString & /*productId*/, CloudReplyHan
     });
 }
 
-void MockTransport::readDeviceData(const QString & /*productId*/, const QString & /*deviceName*/,
+void MockTransport::readDeviceData(const QString & /*productId*/, const QString &deviceName,
                                    CloudReplyHandler done)
 {
+    switchTo(deviceName);   // 每台设备一份状态，别把上一台的时间戳读给这一台
     QTimer::singleShot(kReadDelayMs, this, [this, done]() {
         const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
         QJsonObject data{

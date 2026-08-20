@@ -104,42 +104,53 @@ Rectangle {
         //
         // 放顶栏而不是单独一条：顶栏本来就占 76px，塞进来不吃额外高度。任何占高度
         // 的东西都会挤到调焦页的画面（Crop 从上下裁，吃掉 OSD 时间戳和 logo）。
-        Column {
-            spacing: 1
-            anchors.verticalCenter: parent.verticalCenter
+        // ⚠️ 进度说明与设备名**不要叠成 Column**。叠起来会把设备名往上顶，而右边
+        //    的在线灯是按整条顶栏垂直居中的 —— 两者结构不同，看着就是没对齐
+        //    （实测：设备名比"● 在线"高出小半行）。改成同一 Row 里并排，都用
+        //    verticalCenter 对齐到顶栏中线。
+        // 本批进度徽标。自动跳台之后工人不再点选设备，全靠这里知道"这批还剩几台"
+        // —— 所以做成带底色的徽标，站在机器前一瞟就能看到，而不是一行小灰字。
+        // 全做完转绿：收工的判据要能一眼确认。
+        Rectangle {
+            id: progressBadge
+            property int tick: 0
+            property int total: CloudClient.devices.length
+            property int done: tick >= 0 && bar.stationKey.length > 0
+                               ? Session.stationDoneCount(bar.stationKey) : 0
+            readonly property bool allDone: total > 0 && done >= total
 
-            // 本批进度：自动跳台之后工人靠这一行知道"这批还剩几台"。
-            // ⚠️ 依赖 tick 才会重算 —— stationDoneCount 里调的 StationProgress.isDone
-            //    是函数调用，QML 不会因为它内部数据变了就刷新绑定。
+            Connections {
+                target: StationProgress
+                // ⚠️ 靠信号驱动重算：done 里调的 StationProgress.isDone 是函数调用，
+                //    QML 不会因为它内部数据变了就刷新绑定。
+                function onChanged() { progressBadge.tick++; }
+            }
+
+            visible: bar.isStation && bar.stationKey.length > 0 && total > 0
+            implicitWidth: progressText.implicitWidth + Theme.s4 * 2
+            implicitHeight: 30
+            radius: 15
+            color: allDone ? Theme.pass : Theme.brand
+            anchors.verticalCenter: parent.verticalCenter
+            Behavior on color { ColorAnimation { duration: Theme.durMed } }
+
             Text {
-                id: progressLabel
-                property int tick: 0
-                Connections {
-                    target: StationProgress
-                    function onChanged() { progressLabel.tick++; }
-                }
-                text: {
-                    if (!bar.isStation || bar.stationKey.length === 0)
-                        return "工装卡 · DeviceName";
-                    const total = CloudClient.devices.length;
-                    if (total === 0)
-                        return "工装卡 · DeviceName";
-                    const done = progressLabel.tick >= 0
-                                 ? Session.stationDoneCount(bar.stationKey) : 0;
-                    return "工装卡 · 本工位 " + done + " / " + total + " 已完成";
-                }
-                color: Theme.textDim
-                font.family: TypeScale.family
-                font.pointSize: TypeScale.caption
-                horizontalAlignment: Text.AlignRight
-                width: parent.width
+                id: progressText
+                anchors.centerIn: parent
+                text: progressBadge.done + " / " + progressBadge.total
+                color: "#FFFFFF"
+                font.family: "Consolas"
+                font.pointSize: TypeScale.body
+                font.weight: TypeScale.weightBold
             }
-            DevicePicker {
-                id: picker
-                // 当前工位 key：浮层里的绿/红点表示"这个工位"做完没有
-                station: bar.stationKey
-                onMessage: (text, ok) => bar.deviceMessage(text, ok)
-            }
+        }
+
+        DevicePicker {
+            id: picker
+            // 当前工位 key：浮层里的绿/红点表示"这个工位"做完没有
+            station: bar.stationKey
+            anchors.verticalCenter: parent.verticalCenter
+            onMessage: (text, ok) => bar.deviceMessage(text, ok)
         }
 
         Rectangle {

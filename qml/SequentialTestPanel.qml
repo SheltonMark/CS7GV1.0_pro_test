@@ -55,6 +55,7 @@ FocusScope {
         results = ({});
         pendingReq = -1;
         toastText = "";
+        manualNav = false;
         phase = queue.length > 0 ? "ready" : "idle";
     }
 
@@ -62,6 +63,7 @@ FocusScope {
     function startAll() {
         if (phase !== "ready" || total === 0) return;
         cursor = 0;
+        manualNav = false;      // 「开始测试」要的是链式跑完，不是停在原地
         phase = "item";
         startCurrent();
     }
@@ -117,6 +119,13 @@ FocusScope {
 
     function afterShown() {
         const failed = currentResult !== undefined && currentResult.status === "fail";
+        // 人工切过来的这一项测完就留在原地，不链式前进 —— 工人是特意退回来重测的，
+        // 把他甩到别处（或因"全都有结果了"跳汇总页）等于把这个功能废掉。
+        if (manualNav) {
+            manualNav = false;
+            phase = "item";
+            return;
+        }
         // 自动项失败停留(设备问题要现场处理:重测/跳过/换项);设备判定项同理——
         // 超时多半是"窗口内没按到",停留让工人空格重按,不是终局。
         // 人工判异常已是工人的终局结论,记录后照常前进(2026-08-17 简化流)。
@@ -135,11 +144,22 @@ FocusScope {
         startCurrent();                   // 链式:下一项自动下发,人工项直接出判定页
     }
 
+    // 手动切项：光标移过去，并**把该项的指令重新下发**（原先只挪光标不下发，
+    // 于是"上一项/下一项"看着能按却什么也不发生）。已有结果的项也照发 —— 手动
+    // 退回来就是为了重测。
+    //
+    // manualNav 标记这次是人工切的：afterShown() 默认会链式跳到下一个未判定项，
+    // 那是"开始测试"一路跑下来该有的行为；人工退回第 3 项重测完却被甩走（甚至
+    // 因为"全都有结果了"直接跳汇总页）就不对了 —— 有这个标记就留在原地。
+    property bool manualNav: false
+
     function nav(delta) {
         if (phase !== "item") return;
         const next = cursor + delta;
         if (next < 0 || next >= total) return;
         cursor = next;
+        manualNav = true;
+        startCurrent();
     }
 
     function confirmResults() {
