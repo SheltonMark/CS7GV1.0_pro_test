@@ -89,6 +89,9 @@ QtObject {
 
         const next = StationProgress.nextPending(CloudClient.productId, station,
                                                  CloudClient.devices, cur);
+        StreamLog.log("[进度] advanceStation station=" + station
+                         + " 当前=" + cur + " 名单=" + CloudClient.devices.length
+                         + " 台 → 下一台='" + next + "'");
         if (next.length === 0) {
             // 分清两种"没有下一台"：全做完 vs 剩下的都离线。产线上这两种的处置
             // 完全不同（一个是收工，一个是去检查供电/工装卡）。

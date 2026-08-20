@@ -48,11 +48,15 @@ fi
 # 只回抄 cloud_config.json：仓库根本来就是它的来源之一，语义一致、且已 gitignore。
 # factory_config.json 不回抄 —— 它的来源是 resources/，回抄到根会造出一个永不被读
 # 的文件，还会变成未跟踪脏文件；丢了只是退回默认勾选，与丢密钥不是一个量级。
-if [ -f "$DIST/cloud_config.json" ] \
-   && ! cmp -s "$DIST/cloud_config.json" "$HERE/cloud_config.json" 2>/dev/null; then
-    cp "$DIST/cloud_config.json" "$HERE/cloud_config.json"
-    echo "[build] 备份现场配置到仓库根: cloud_config.json"
-fi
+# accounts.json 同理：账号库是超级用户在软件里建出来的，只存在于 dist；
+# dist 一没就得重建全部账号（密码是哈希，无法从别处恢复）。
+for keep in cloud_config.json accounts.json; do
+    if [ -f "$DIST/$keep" ] \
+       && ! cmp -s "$DIST/$keep" "$HERE/$keep" 2>/dev/null; then
+        cp "$DIST/$keep" "$HERE/$keep"
+        echo "[build] 备份现场配置到仓库根: $keep"
+    fi
+done
 
 # CMake 生成期会往 build/qmltypes 写文件但不保证先建目录，
 # 干净构建时会报 "Cannot open file for write"。先建出来。
@@ -131,11 +135,16 @@ cp "$HERE/resources/factory_config.json" "$DIST_WORK/"
 #                        ⚠️ 这一步只在"上一版 dist 还在"时管用。dist 整个消失的
 #                        情况由构建开头的"回抄到仓库根"兜住，两者配合才完整。
 #   factory_config.json  管理员在软件里勾选的测试项会写回此文件，重建不能清
-if [ -f "$DIST/cloud_config.json" ]; then
-    cp "$DIST/cloud_config.json" "$DIST_WORK/"
-fi
-if [ -f "$DIST/factory_config.json" ]; then
-    cp "$DIST/factory_config.json" "$DIST_WORK/"
+#   accounts.json        操作者账号库（超级用户在软件里建的，密码是哈希、无法从
+#                        别处恢复；清掉等于全产线登不进去）
+for keep in cloud_config.json factory_config.json accounts.json; do
+    if [ -f "$DIST/$keep" ]; then
+        cp "$DIST/$keep" "$DIST_WORK/"
+    fi
+done
+# 仓库根的 accounts.json（上次构建回抄的备份）：dist 里没有时用它恢复
+if [ ! -f "$DIST_WORK/accounts.json" ] && [ -f "$HERE/accounts.json" ]; then
+    cp "$HERE/accounts.json" "$DIST_WORK/"
 fi
 
 # VLC 运行时（拉流引擎，约 137MB）。Qt Multimedia 对 RTSP/H265 大流与 http-flv

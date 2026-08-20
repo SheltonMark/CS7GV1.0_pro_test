@@ -12,18 +12,34 @@ import QtQuick.Layouts
 Item {
     id: root
 
-    // 开发用:--autoselect 以超级用户直接登录(ProductGate 的同名参数接力跳过产品门)
-    Component.onCompleted: {
-        if (Qt.application.arguments.indexOf("--autoselect") >= 0)
-            Session.user = MockData.users[0]
-    }
-
     property string error: ""
+
+    // ⚠️ 一个对象只能有一个 Component.onCompleted —— 写两遍后者会**静默覆盖**前者
+    //    （不报错，只是前一个永远不执行）。两件事必须并在这里。
+    Component.onCompleted: {
+        // 首启把早先写在 QML 里的三个账号迁成正式账号（沿用工号姓名，密码仍 1234），
+        // 之后一律走 accounts.json。产线已经在用这几个工号，换掉等于要重新培训。
+        AccountStore.migrateLegacyIfEmpty();
+
+        // 开发用:--autoselect 以超级用户直接登录(ProductGate 的同名参数接力跳过产品门)。
+        // 从账号库里挑一个超级用户，不再引用 MockData。
+        if (Qt.application.arguments.indexOf("--autoselect") >= 0) {
+            const list = AccountStore.accounts;
+            for (let i = 0; i < list.length; ++i) {
+                if (list[i].role === "super") {
+                    Session.user = list[i];
+                    break;
+                }
+            }
+        }
+    }
 
     function tryLogin() {
         const id = userField.text.trim();
-        const hit = MockData.users.find(u => u.id === id && u.pwd === pwdField.text);
-        if (hit) {
+        // 走账号库（PBKDF2 校验）。失败不区分"工号不存在"与"密码错" ——
+        // 区分开等于告诉试密码的人哪些工号有效。
+        const hit = AccountStore.verify(id, pwdField.text);
+        if (hit && hit.id !== undefined) {
             root.error = "";
             pwdField.text = "";
             // 登录成功才记工号：输错的不该被记住

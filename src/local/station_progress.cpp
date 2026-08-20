@@ -8,6 +8,8 @@
 #include <QSaveFile>
 #include <QVariantMap>
 
+#include "stream_log.hpp"
+
 namespace {
 
 // 与 exe 同目录，和 factory_config.json 一样是"现场可看可删"的文件。
@@ -108,8 +110,12 @@ void StationProgress::syncFromDevice(const QString &productId, const QString &de
 QString StationProgress::nextPending(const QString &productId, const QString &station,
                                     const QVariantList &devices, const QString &after) const
 {
-    if (devices.isEmpty() || station.isEmpty())
+    if (devices.isEmpty() || station.isEmpty()) {
+        StreamLog::append(QStringLiteral(
+            "[进度] nextPending 直接返回空：devices=%1 station='%2'")
+            .arg(devices.size()).arg(station));
         return QString();
+    }
 
     // after 在名单里的位置；不在（或为空）就从头开始
     int start = -1;
@@ -123,17 +129,29 @@ QString StationProgress::nextPending(const QString &productId, const QString &st
     // 从 after 的下一个起绕一圈。绕回是必要的：工人不一定严格按卡号顺序放机器，
     // 单向走到底会在中途留下没测的机器却提示"全做完了"。
     const int n = devices.size();
+    int skipNoName = 0, skipOffline = 0, skipDone = 0;
     for (int step = 1; step <= n; ++step) {
         const QVariantMap d = devices.at((start + step) % n).toMap();
         const QString name = d.value(QStringLiteral("deviceName")).toString();
-        if (name.isEmpty())
+        if (name.isEmpty()) {
+            ++skipNoName;
             continue;
-        if (!d.value(QStringLiteral("online")).toBool())
-            continue;                          // 离线的跳过：切过去也没法测
-        if (isDone(productId, name, station))
-            continue;                          // 本工位已做完的跳过
+        }
+        if (!d.value(QStringLiteral("online")).toBool()) {
+            ++skipOffline;                     // 离线的跳过：切过去也没法测
+            continue;
+        }
+        if (isDone(productId, name, station)) {
+            ++skipDone;                        // 本工位已做完的跳过
+            continue;
+        }
         return name;
     }
+    // 一台都挑不出来时把原因摊开 —— "不跳台"是个哑失败，不打日志只能靠猜
+    StreamLog::append(QStringLiteral(
+        "[进度] nextPending 无结果：共 %1 台，after='%2'(idx=%3)，"
+        "跳过 无名=%4 离线=%5 已完成=%6")
+        .arg(n).arg(after).arg(start).arg(skipNoName).arg(skipOffline).arg(skipDone));
     return QString();
 }
 

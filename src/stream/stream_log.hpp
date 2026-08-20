@@ -36,6 +36,9 @@ public:
     // selectAll()+copy() 代劳 —— 那要求控件常驻存活，日志面板因此没法真正
     // 收起/销毁。放到 C++ 就没这个牵连了。
     Q_INVOKABLE void copyToClipboard() const;
+    // 给 QML 用的写日志入口（静态 append 在 QML 里调不到）。排障期 QML 侧也要能
+    // 往同一条日志里写，否则"界面上什么都没发生"这类问题只能靠猜。
+    Q_INVOKABLE void log(const QString &line) { append(line); }
 
     // 线程安全。前缀建议用 [xp2p]/[vlc] 之类，便于筛。
     static void append(const QString &line);

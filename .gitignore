@@ -8,3 +8,7 @@ dist.old.*/
 package/
 # 云 API 密钥（本机联调用，build.sh 会带进 dist）——绝不进仓库
 cloud_config.json
+# 操作者账号库（工号+姓名+密码哈希，属人员信息）——绝不进仓库
+accounts.json
+# 各工装卡的工位进度（现场运行态，换批次即失效）
+station_progress.json

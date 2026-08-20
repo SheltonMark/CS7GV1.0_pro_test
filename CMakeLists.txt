@@ -129,6 +129,11 @@ qt_add_qml_module(app_ptest
         # 上一个人的工号（实际发生过）。
         src/local/local_settings.hpp
         src/local/local_settings.cpp
+        # 操作者账号库。密码 PBKDF2-HMAC-SHA256 加盐存 accounts.json（随包发，所以
+        # 绝不能存明文——账号权限含"跳过测试项"与云调试页）。增删走软件内管理界面：
+        # 哈希没人能手算。不进 git，按 cloud_config.json 那套保护。
+        src/local/account_store.hpp
+        src/local/account_store.cpp
         # 云链路层（2026-08-17 起）：CloudClient 是 QML 单例入口，指令串行 +
         # RequestId 闭环；传输可切换（Mock / 腾讯云 API3.0 直连），由 exe 同目录
         # cloud_config.json 决定，密钥文件不进 git。
