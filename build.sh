@@ -57,6 +57,20 @@ cmake --build "$BUILD"
 # 留下一个缺插件的残缺 dist —— 而且 windeployqt 仍返回 0，不会中断构建。
 STAGE="$HERE/dist.stage.$$"
 rm -rf "$STAGE"
+
+# 先扫掉别的 PID 留下的暂存目录。构建被打断（Ctrl-C、进程被杀、工具超时）时
+# 收不了尾，就会留下一个**整包大小（约 357MB）**的孤儿，而下次构建 PID 不同、
+# 上面那行 rm 只清自己那个，永远清不到它 —— 攒几次就吃掉几个 G。
+for orphan in "$HERE"/dist.stage.*; do
+    [ -d "$orphan" ] && [ "$orphan" != "$STAGE" ] || continue
+    echo "[build] 清理残留暂存目录: $(basename "$orphan")"
+    rm -rf "$orphan"
+done
+
+# 本次构建自己的收尾：正常路径在末尾 mv 走了就不剩东西，异常退出/被打断时
+# 靠这个 trap 兜住。EXIT 覆盖 return/exit，INT/TERM 覆盖 Ctrl-C 与被杀。
+trap 'rm -rf "$STAGE"' EXIT INT TERM
+
 mkdir -p "$STAGE"
 cp "$BUILD/ProductTestTool.exe" "$STAGE/"
 
@@ -198,14 +212,54 @@ for must in \
     "$DIST_WORK/qml/QtQuick/Controls/Fusion" ; do
     if [ ! -e "$must" ]; then
         echo "[build] FAIL 部署不完整，缺: $must" >&2
-        rm -rf "$STAGE"
-        exit 1
+        exit 1   # 暂存目录由 trap 清理
     fi
 done
 
-# 原子替换
-rm -rf "$DIST"
-mv "$STAGE" "$DIST"
+# 替换 dist。两条路：
+#
+# 首选「先把旧的挪开、新的就位、再删旧的」—— 这样 mv 失败还能回滚，不会出现
+# "旧的已删、新的没就位"的空手状态（实测踩过，只能整包重建）。
+#
+# 但整目录重命名在 Windows 下有个硬限制：**目录内只要有一个打开的句柄就不允许
+# rename**，报 `Device or resource busy`。程序跑着时 dist/logs/*.log 正被写，
+# 就会撞上。第 34 行那个 exe 占用检查挡不住这个 —— 它只测 exe，且检查与 mv 之间
+# 有时间差（构建要几十秒，期间完全可能有人把程序起来）。
+# 所以退路是原来那套 `rm -rf` 再 mv：它逐个删文件，锁住的跳过，能过。
+trap - EXIT INT TERM          # 从这里起 STAGE 要变成 DIST，别再让 trap 删它
+OLD="$HERE/dist.old.$$"
+rm -rf "$OLD"
+if [ -d "$DIST" ] && mv "$DIST" "$OLD" 2>/dev/null; then
+    # 安全路径：旧的已挪到 OLD，出错可回滚
+    if ! mv "$STAGE" "$DIST"; then
+        echo "[build] FAIL 无法就位 dist，已回滚到上一版" >&2
+        mv "$OLD" "$DIST"
+        rm -rf "$STAGE"
+        exit 1
+    fi
+    rm -rf "$OLD"
+elif [ -d "$DIST" ]; then
+    # 挪不动 = dist 里有文件被占用。**到此为止，一个字节都不要动。**
+    #
+    # 别试图退回 `rm -rf dist` —— 实测它同样删不掉被独占的文件，只会把 dist
+    # 删残了才失败，比直接停下来坏得多（2026-08-20 就是这个状态：程序在跑、
+    # dist/logs/*.log 被写着，旧 dist 被删掉一半）。
+    #
+    # 这一步顺带就是最可靠的占用探测：第 34 行只测 exe，测不到 logs 里的日志，
+    # 而且那个检查与这里隔着几十秒的构建时间，中间完全可能有人把程序起起来。
+    echo "[build] FAIL dist 里有文件被占用，无法替换 —— 程序还在运行？" >&2
+    echo "[build]      关掉 dist/ProductTestTool.exe 再构建。" >&2
+    echo "[build]      旧 dist 未被改动，暂存目录已清理，本次构建无副作用。" >&2
+    rm -rf "$STAGE"
+    exit 1
+else
+    # dist 压根不存在（首次构建，或被手工删过）
+    if ! mv "$STAGE" "$DIST"; then
+        echo "[build] FAIL 无法就位 dist" >&2
+        rm -rf "$STAGE"
+        exit 1
+    fi
+fi
 
 # 用真实字节数，不用 du —— dist 是上千个小文件，在大簇盘（如 A:）上
 # du 报的"占用"会比实际大十几倍，看着像 1.2G 其实只有 81MB。

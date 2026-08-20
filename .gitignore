@@ -2,6 +2,8 @@ build/
 build.stage.*/
 dist/
 dist.stage.*/
+# 原子替换时旧 dist 的临时落脚点（mv 失败时用来回滚），正常构建结束即删
+dist.old.*/
 *.zip
 package/
 # 云 API 密钥（本机联调用，build.sh 会带进 dist）——绝不进仓库
