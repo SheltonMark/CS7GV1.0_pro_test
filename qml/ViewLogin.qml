@@ -26,7 +26,9 @@ Item {
         if (hit) {
             root.error = "";
             pwdField.text = "";
-            Session.user = hit;    // 真实实现:此处记审计(登录事件)并持久化"记住工号"
+            // 登录成功才记工号：输错的不该被记住
+            LocalSettings.setRememberedUserId(id, rememberBox.checked);
+            Session.user = hit;    // 真实实现:此处还要记审计(登录事件)
         } else {
             root.error = "工号或密码不正确";
         }
@@ -56,14 +58,7 @@ Item {
             Layout.alignment: Qt.AlignHCenter
         }
 
-        Text {
-            text: "操作者登录 · 产线离线可用"
-            color: Theme.textSecondary
-            font.family: TypeScale.family
-            font.pointSize: TypeScale.body
-            Layout.alignment: Qt.AlignHCenter
-            Layout.bottomMargin: Theme.s3
-        }
+        Item { Layout.preferredHeight: Theme.s3 }
 
         Card {
             fitContent: true
@@ -78,8 +73,11 @@ Item {
                     id: userField
                     Layout.fillWidth: true
                     placeholderText: "工号"
-                    // mock 模拟"记住上次工号";真实实现从 QSettings 读
-                    text: MockData.users[0].id
+                    // 上次登录的工号，来自本机 QSettings（当前用户注册表）。
+                    // ⚠️ 早先这里写死 MockData.users[0].id —— 于是**谁打开都是那个
+                    //    工号**，把软件包发给别人也一样（2026-08-21 反馈）。那不是
+                    //    "记住工号"泄露，是它从来就没实现过、只是个写死的假值。
+                    text: LocalSettings.rememberedUserId()
                     font.family: "Consolas"
                     font.pointSize: TypeScale.body
                 }
@@ -103,7 +101,16 @@ Item {
 
                 RowLayout {
                     Layout.fillWidth: true
-                    CheckBox { text: "记住工号"; checked: true }
+                    CheckBox {
+                        id: rememberBox
+                        text: "记住工号"
+                        // 读本机设置，不再恒 true。取消勾选会把已存的工号抹掉
+                        // （见 LocalSettings::setRememberedUserId）——"取消"就该是
+                        // "别在这台机器上留我的工号"，只停止写入等于没取消。
+                        checked: LocalSettings.rememberEnabled()
+                        onToggled: LocalSettings.setRememberedUserId(
+                                       userField.text.trim(), checked)
+                    }
                     Item { Layout.fillWidth: true }
                 }
 
@@ -115,15 +122,6 @@ Item {
                     onClicked: root.tryLogin()
                 }
             }
-        }
-
-        Text {
-            // mock 演示口令提示,真实版删除
-            text: "演示账户：0045009 超级用户 / 0038165 工程师 / 9000001 技术员，密码均 1234"
-            color: Theme.textDim
-            font.family: TypeScale.family
-            font.pointSize: TypeScale.caption
-            Layout.alignment: Qt.AlignHCenter
         }
 
         Text {

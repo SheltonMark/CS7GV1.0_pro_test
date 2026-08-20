@@ -124,6 +124,11 @@ qt_add_qml_module(app_ptest
         # 任何云调用 —— 写标识成功那一刻就已知；切设备读上报时顺手与设备真值校正。
         src/local/station_progress.hpp
         src/local/station_progress.cpp
+        # 本机偏好（记住工号等）。⚠️ 走 QSettings 落当前用户注册表，**不能**放 exe
+        # 同目录的 json —— 那样会被打进 dist 再随 zip 发给别人，别人打开看到的是
+        # 上一个人的工号（实际发生过）。
+        src/local/local_settings.hpp
+        src/local/local_settings.cpp
         # 云链路层（2026-08-17 起）：CloudClient 是 QML 单例入口，指令串行 +
         # RequestId 闭环；传输可切换（Mock / 腾讯云 API3.0 直连），由 exe 同目录
         # cloud_config.json 决定，密钥文件不进 git。
