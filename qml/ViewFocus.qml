@@ -83,6 +83,15 @@ Item {
         //    上面刚把 sourceUrl 清空，上一轮的搜索结果会立刻又冒出来 —— 看着像
         //    "自动跳台顺带重新搜索了一遍"，其实是残留列表（实测踩过）。
         finder.clear();
+
+        // ⚠️⚠️ RTSP 模式下 IP 必须一起清掉，否则会**错判**：
+        //    onInfoUpdated 里带出 IP 的条件是 `!hadIp`（工人手填过就不覆盖），
+        //    跳台后 ipField 里还是上一台的 IP，rtspUrl 也还是上一台的 —— 工人对着
+        //    上一台的画面做判定，却把标识写到了下一台头上。
+        //    清空后，新设备上报的 IpAddress 会自动带出（见 onInfoUpdated）。
+        if (root.rtspMode)
+            ipField.text = "";
+
         Session.advanceStation("focus");
     }
 

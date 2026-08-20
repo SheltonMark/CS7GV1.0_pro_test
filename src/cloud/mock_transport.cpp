@@ -180,8 +180,13 @@ void MockTransport::describeDevices(const QString & /*productId*/, CloudReplyHan
 void MockTransport::readDeviceData(const QString & /*productId*/, const QString &deviceName,
                                    CloudReplyHandler done)
 {
-    switchTo(deviceName);   // 每台设备一份状态，别把上一台的时间戳读给这一台
-    QTimer::singleShot(kReadDelayMs, this, [this, done]() {
+    // ⚠️ switchTo 必须在**真正读 info_ 的那一刻**调，不能在函数入口调。
+    //    switchTo 是"换入换出"，而这里的读被 QTimer 推迟了 120ms —— 期间写标识的
+    //    execute()（延迟 650ms，自己也会 switchTo）完全可能插进来把 current_ 换走，
+    //    于是这次读拿到的是**别的设备**的 info_。表现：写完标识回读值对不上刚下发的
+    //    时间戳，"回读确认"永不成立，自动跳台压根不触发（实测踩过）。
+    QTimer::singleShot(kReadDelayMs, this, [this, deviceName, done]() {
+        switchTo(deviceName);
         const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
         QJsonObject data{
             {QStringLiteral("ProductTestInfo"),
@@ -260,7 +265,11 @@ void MockTransport::execute(const QString &actionId, const QJsonObject &p)
         // 复位按键:模拟"工人按住 3 秒"——布防后再等 2.8s 才出结果,让 running
         // 相位的动作提示真的展示一段(节奏与真机同构,总耗时 ≈ 3.5s)。
         if (item == 4) {
-            QTimer::singleShot(2800, this, [this, requestId]() {
+            // 设备名要带上并在回调里重新 switchTo：2800ms 后 current_ 可能已经换成
+            // 别的设备（工人切走 / 自动跳台），否则这条结果会落到错误的那台上。
+            const QString owner = current_;
+            QTimer::singleShot(2800, this, [this, owner, requestId]() {
+                switchTo(owner);
                 setResult(requestId, 2, 4, 0,
                           QStringLiteral("key held 3s, event reported (mock)"));
             });

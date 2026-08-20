@@ -153,12 +153,19 @@ FocusScope {
     // 因为"全都有结果了"直接跳汇总页）就不对了 —— 有这个标记就留在原地。
     property bool manualNav: false
 
+    // 可切项的相位：item（刚进入某项）与 judge（人工项等工人按键）。
+    // ⚠️ 不能只认 item —— 它是个**瞬态**：startCurrent() 紧接着就把相位变成 judge
+    //    或 running，工人看到的界面几乎永远不在 item，按钮就恒灰（实测踩过）。
+    //    running 有指令在途，切走会让指令流水对错行，所以不放开。
+    readonly property bool canNav: phase === "item" || phase === "judge"
+
     function nav(delta) {
-        if (phase !== "item") return;
+        if (!canNav) return;
         const next = cursor + delta;
         if (next < 0 || next >= total) return;
         cursor = next;
         manualNav = true;
+        phase = "item";        // 从 judge 切走时要回到 item，否则 startCurrent 不动
         startCurrent();
     }
 
@@ -294,7 +301,7 @@ FocusScope {
                 AppButton {
                     text: "上一项"
                     glyph: Icons.skip
-                    enabled: panel.phase === "item" && panel.cursor > 0
+                    enabled: panel.canNav && panel.cursor > 0
                     implicitHeight: Theme.hit - 12
                     onClicked: { panel.nav(-1); panel.forceActiveFocus(); }
                 }
@@ -329,7 +336,7 @@ FocusScope {
                 AppButton {
                     text: "下一项"
                     glyph: Icons.play
-                    enabled: panel.phase === "item" && panel.cursor < panel.total - 1
+                    enabled: panel.canNav && panel.cursor < panel.total - 1
                     implicitHeight: Theme.hit - 12
                     onClicked: { panel.nav(1); panel.forceActiveFocus(); }
                 }
