@@ -92,7 +92,40 @@ Item {
         if (root.rtspMode)
             ipField.text = "";
 
-        Session.advanceStation("focus");
+        const next = Session.advanceStation("focus");
+        if (next.length === 0)
+            return;              // 没有下一台（都做完 / 剩下的都离线），提示已由 Session 发出
+
+        // ── 切完必须把流拉起来，否则"自动跳台"等于只换了个名字，画面是空的、
+        //    还要工人再点一次「开始拉流」。两种模式路径不同：
+        if (root.cloudMode) {
+            // 云：立刻建联。URL 就绪走 onLiveUrlReady 塞给 preview。
+            root.startCloudStream();
+        } else {
+            // RTSP：现在还不知道新设备的 IP —— advanceStation 里那次 refreshInfo()
+            // 的应答才带 IpAddress。所以只置个待办，等 onInfoUpdated 拿到 IP 再起播。
+            // 拿不到 IP（设备没上报）就退回搜索，见 autoStartTimeout。
+            root.pendingRtspAutoStart = true;
+            autoStartTimeout.restart();
+        }
+    }
+
+    // RTSP 跳台后的"等 IP 再起播"待办。设备上报里没有 IpAddress 时不能干等，
+    // 超时就自动起一轮搜索 —— 这才是你要的"跳到下个设备自动搜 IP"。
+    property bool pendingRtspAutoStart: false
+
+    Timer {
+        id: autoStartTimeout
+        interval: 4000
+        onTriggered: {
+            if (!root.pendingRtspAutoStart)
+                return;
+            root.pendingRtspAutoStart = false;
+            // 设备没报 IP：起一轮广播搜索，工人双击结果即可（pickDevice 会起播）
+            finder.clear();
+            finder.start();
+            toast.show("新设备未上报 IP，已自动搜索 —— 双击结果开始拉流", true, 4000);
+        }
     }
 
     // 双击搜索结果 = 选定该设备:停广播(目的已达成,不再打扰网络)、
@@ -166,6 +199,14 @@ Item {
             if (!hadIp && info.IpAddress !== undefined
                 && ("" + info.IpAddress).length > 0)
                 ipField.text = info.IpAddress;
+
+            // 跳台后在等 IP 起播：拿到了就立刻拉流（这一步是"自动跳台"的下半截，
+            // 少了它切完设备画面是空的，还得工人再点一次「开始拉流」）。
+            if (root.pendingRtspAutoStart && root.rtspUrl.length > 0) {
+                root.pendingRtspAutoStart = false;
+                autoStartTimeout.stop();
+                root.startRtspStream();
+            }
             // ⚠️ 顺序要紧：**先校正进度，再跳台**。
             //    反过来写过一版，是"写完标识不跳台"的真因：finishAndAdvance() 已经
             //    把 CloudClient.deviceName 换成下一台，紧接着 syncFromDevice 却拿

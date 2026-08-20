@@ -115,8 +115,13 @@ Rectangle {
             id: progressBadge
             property int tick: 0
             property int total: CloudClient.devices.length
+            // 直接问 C++（与浮层绿点同一套遍历），不再经 Session 的 JS 计数 ——
+            // 那条链实测会让徽标恒为 0，而绿点是对的。
             property int done: tick >= 0 && bar.stationKey.length > 0
-                               ? Session.stationDoneCount(bar.stationKey) : 0
+                               ? StationProgress.doneCount(CloudClient.productId,
+                                                           bar.stationKey,
+                                                           CloudClient.devices)
+                               : 0
             readonly property bool allDone: total > 0 && done >= total
 
             Connections {

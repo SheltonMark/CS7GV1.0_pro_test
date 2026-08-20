@@ -57,6 +57,14 @@ public:
                                     const QVariantList &devices,
                                     const QString &after) const;
 
+    // 本工位已完成台数。与 nextPending 并排放 C++：同一份数据、同一套遍历，
+    // 两处结论不可能再不一致。
+    // ⚠️ 早先这个计数在 QML 里（Session.stationDoneCount），实测顶栏徽标恒为 0 而
+    //    浮层绿点却是对的 —— 同一个存储两处结论不同。QML 侧那条链（单例函数调用 +
+    //    QVariantList 遍历 + 绑定重算）排查成本远高于直接下沉到 C++。
+    Q_INVOKABLE int doneCount(const QString &productId, const QString &station,
+                              const QVariantList &devices) const;
+
 signals:
     // 任何一格变化都发这个信号：浮层里十个点全靠它刷新，粒度不值得再细分。
     void changed();

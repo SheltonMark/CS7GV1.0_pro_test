@@ -137,6 +137,20 @@ QString StationProgress::nextPending(const QString &productId, const QString &st
     return QString();
 }
 
+int StationProgress::doneCount(const QString &productId, const QString &station,
+                               const QVariantList &devices) const
+{
+    if (station.isEmpty())
+        return 0;
+    int n = 0;
+    for (const QVariant &v : devices) {
+        const QString name = v.toMap().value(QStringLiteral("deviceName")).toString();
+        if (!name.isEmpty() && isDone(productId, name, station))
+            ++n;
+    }
+    return n;
+}
+
 void StationProgress::clearProduct(const QString &productId)
 {
     const QString prefix = productId + QLatin1Char('/');
