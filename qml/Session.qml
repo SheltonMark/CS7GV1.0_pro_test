@@ -61,9 +61,10 @@ QtObject {
     function deviceOnlineInRoster(name) {
         if (!name || name.length === 0)
             return false;
-        for (const d of CloudClient.devices)
-            if (d.deviceName === name)
-                return d.online === true;
+        const list = CloudClient.devices;      // 同上：下标遍历，别用 for...of
+        for (let i = 0; i < list.length; ++i)
+            if (list[i].deviceName === name)
+                return list[i].online === true;
         return false;
     }
 
@@ -92,9 +93,12 @@ QtObject {
             // 分清两种"没有下一台"：全做完 vs 剩下的都离线。产线上这两种的处置
             // 完全不同（一个是收工，一个是去检查供电/工装卡）。
             let pending = 0;
-            for (const d of CloudClient.devices)
-                if (!StationProgress.isDone(CloudClient.productId, d.deviceName, station))
+            const list = CloudClient.devices;  // 下标遍历，理由同 stationDoneCount
+            for (let i = 0; i < list.length; ++i) {
+                const nm = list[i].deviceName;
+                if (nm && !StationProgress.isDone(CloudClient.productId, nm, station))
                     ++pending;
+            }
             autoAdvanceExhausted(pending > 0
                 ? "还有 " + pending + " 台未测，但都不在线 —— 检查工装卡与供电"
                 : "本批 " + CloudClient.devices.length + " 台在本工位已全部完成");
@@ -107,14 +111,21 @@ QtObject {
         return next;
     }
 
-    // 本工位已完成台数 / 总台数，给顶栏显示进度
+    // 本工位已完成台数 / 总台数，给顶栏徽标显示进度。
+    // ⚠️ 用下标遍历，不用 for...of。CloudClient.devices 是 QVariantList，
+    //    for...of 取出的元素在 QML 的 JS 引擎里不保证是普通对象，
+    //    d.deviceName 可能是 undefined —— 表现就是徽标恒为 0，而浮层里的绿点
+    //    （delegate 直接拿 modelData.deviceName）却是对的。
     function stationDoneCount(station) {
         if (!station || station.length === 0)
             return 0;
+        const list = CloudClient.devices;
         let n = 0;
-        for (const d of CloudClient.devices)
-            if (StationProgress.isDone(CloudClient.productId, d.deviceName, station))
+        for (let i = 0; i < list.length; ++i) {
+            const name = list[i].deviceName;
+            if (name && StationProgress.isDone(CloudClient.productId, name, station))
                 ++n;
+        }
         return n;
     }
 

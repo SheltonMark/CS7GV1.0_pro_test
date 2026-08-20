@@ -157,6 +157,21 @@ Item {
             if (!hadIp && info.IpAddress !== undefined
                 && ("" + info.IpAddress).length > 0)
                 ipField.text = info.IpAddress;
+            // ⚠️ 顺序要紧：**先校正进度，再跳台**。
+            //    反过来写过一版，是"写完标识不跳台"的真因：finishAndAdvance() 已经
+            //    把 CloudClient.deviceName 换成下一台，紧接着 syncFromDevice 却拿
+            //    **上一台的 info** 去写**新设备名** —— 把这一台的 FocusTime 盖到了
+            //    下一台头上，那台立刻被 nextPending 当成"已完成"跳过，链子就断了。
+            //    表现正是：本台绿点亮了、进度却不动、也不切设备。
+            //
+            // 用设备真值校正本地进度（顶栏徽标与浮层绿点）。**零额外调用** ——
+            // 这份上报本来就要读。设备侧时间戳是权威，本地缓存只为重启后不丢；
+            // 两边不一致时以设备为准（本地被删会补回来，本地虚标会被清掉）。
+            StationProgress.syncFromDevice(
+                CloudClient.productId, CloudClient.deviceName,
+                info.FocusTime || "", info.SemiTime || "",
+                info.FinishTime || "", info.InspectTime || "");
+
             // 写标识回读确认:设备里读出的 FocusTime == 刚下发的才算写成功
             if (root.sentStamp.length > 0 && info.FocusTime === root.sentStamp) {
                 root.writtenStamp = root.sentStamp;
@@ -166,13 +181,6 @@ Item {
                 // 切设备会清掉画面（sourceUrl 归空），工人对下一台重新点开始拉流。
                 root.finishAndAdvance();
             }
-            // 顺手用设备真值校正本地进度（顶栏浮层的绿/红点）。**零额外调用** ——
-            // 这份上报本来就要读。设备侧的三个时间戳才是权威，本地缓存只为重启后
-            // 不丢；两边不一致时以设备为准（本地被删会补回来，本地虚标会被清掉）。
-            StationProgress.syncFromDevice(
-                CloudClient.productId, CloudClient.deviceName,
-                info.FocusTime || "", info.SemiTime || "",
-                info.FinishTime || "", info.InspectTime || "");
         }
         function onCommandFinished(requestId, command, item, code, detail) {
             if (requestId !== root.writeReqId) return;

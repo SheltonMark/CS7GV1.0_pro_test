@@ -116,13 +116,25 @@ Item {
                     font.weight: TypeScale.weightMedium
                 }
                 Item { Layout.fillWidth: true }
-                Text {
-                    // 绿/红点的含义要写出来 —— 不写工人只会猜成"在线/离线"
+                // 图例：绿/红点的含义要写出来 —— 不写工人只会猜成"在线/离线"。
+                // ⚠️ 点和文字必须分开着色。早先写成一个 Text（"● 已完成本工位"），
+                //    整串都被 textDim 压成灰点，跟行里的绿点对不上、图例反而误导。
+                Row {
                     visible: root.station.length > 0
-                    text: "● 已完成本工位"
-                    color: Theme.textDim
-                    font.family: TypeScale.family
-                    font.pointSize: TypeScale.caption
+                    spacing: Theme.s1 + 2
+
+                    Rectangle {
+                        width: 9; height: 9; radius: 4.5
+                        color: Theme.pass
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
+                    Text {
+                        text: "已完成本工位"
+                        color: Theme.textDim
+                        font.family: TypeScale.family
+                        font.pointSize: TypeScale.caption
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
                 }
             }
 
