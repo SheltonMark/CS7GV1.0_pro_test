@@ -258,10 +258,20 @@ trap - EXIT INT TERM          # 从这里起 STAGE 要变成 DIST，别再让 tr
 OLD="$HERE/dist.old.$$"
 rm -rf "$OLD"
 MV_ERR=""
+MV_OK=0
 if [ -d "$DIST" ]; then
     MV_ERR=$(mv "$DIST" "$OLD" 2>&1) && MV_OK=1 || MV_OK=0
-else
-    MV_OK=0
+    # ⚠️ MSYS 的 mv 在 A 盘（网络盘/非 NTFS 语义）上会因为试图保留权限位而报
+    #    Permission denied，即使目录**完全没有被占用**（实测：同一时刻 PowerShell
+    #    的 Rename-Item 能成功）。只信 mv 的结论会把每次构建都拦死 —— 比它要防的
+    #    "旧包被删残"更糟。所以失败后用 Windows 原生 move 再试一次。
+    #    真正被占用时原生 move 同样会失败，守卫仍然有效。
+    if [ "$MV_OK" = "0" ]; then
+        if cmd //c move "$(cygpath -w "$DIST")" "$(cygpath -w "$OLD")" >/dev/null 2>&1; then
+            MV_OK=1
+            MV_ERR=""
+        fi
+    fi
 fi
 if [ "$MV_OK" = "1" ]; then
     # 安全路径：旧的已挪到 OLD，出错可回滚

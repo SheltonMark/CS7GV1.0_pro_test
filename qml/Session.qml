@@ -1,5 +1,13 @@
 pragma Singleton
 import QtQuick
+// ⚠️ 必须显式 import ptest：单例的 JS 里**不能隐式引用另一个单例**。少了这行，
+//    advanceStation / stationDoneCount / deviceOnlineInRoster 里对 CloudClient、
+//    StationProgress、StreamLog 的引用全部抛
+//      ReferenceError: CloudClient is not defined
+//    —— 函数在第一次碰到它时就中断，表现为"自动跳台完全没反应"，而顶栏徽标却是对的
+//    （TopBar 直接调 StationProgress.doneCount，那里 CloudClient 可见）。
+//    这一对矛盾现象我追了三轮才定位，日志里那行 ReferenceError 才是真凭据。
+import ptest
 
 // 会话上下文。启动门选定产品后锁定,null = 仍在启动门。
 //
