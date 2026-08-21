@@ -98,7 +98,9 @@ Item {
             root.suppressIpAutofill = true;
         }
 
-        const next = Session.advanceStation("focus");
+        // RTSP 分支下面会发一条更具体的提示（含"切到哪一台"+"去搜索结果里选 IP"），
+        // 所以让 Session 别再发通用那条 —— 两条同时弹会重叠且内容重复。
+        const next = Session.advanceStation("focus", root.rtspMode);
         if (next.length === 0)
             return;              // 没有下一台（都做完 / 剩下的都离线），提示已由 Session 发出
 
@@ -118,6 +120,8 @@ Item {
             // 广播搜索的结果是当场确认可达的，工人双击选定即起播（pickDevice）。
             finder.clear();
             finder.start();
+            // 这条已包含"切到哪一台"，所以上面用 silent 压掉了通用那条 —— 否则两条
+            // 同时弹、内容还重复
             toast.show("已切到 " + next + " —— 请从搜索结果里选择该设备的 IP", true, 4000);
         }
     }
@@ -318,6 +322,10 @@ Item {
                     onClicked: {
                         if (finder.searching) {
                             finder.stop();
+                            // 结果列表一起收起。finder.stop() 只停广播、保留列表，
+                            // 面板会继续挂在那儿占掉画面高度 —— 而"停止搜索"的语义
+                            // 就是"这轮不选了"，留着列表既占地方又可能被误选。
+                            finder.clear();
                         } else {
                             finder.clear();   // 新一轮不留旧结果,防误选上一台
                             finder.start();

@@ -55,6 +55,7 @@ target_link_libraries(app_ptest PRIVATE
 # pragma Singleton 只是 QML 侧声明，构建系统这边也必须标。
 set_source_files_properties(
     qml/Theme.qml qml/TypeScale.qml qml/Icons.qml qml/MockData.qml qml/Session.qml
+    qml/ToastBus.qml
     PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
 
 # logo 在 resources/ 但 QML 落在 qrc:/qt/qml/ptest/qml/ 下，
@@ -88,6 +89,8 @@ qt_add_qml_module(app_ptest
         qml/LivePreview.qml
         qml/DeviceDiscoveryPanel.qml
         qml/Toast.qml
+        # Toast 互斥总线：8 个 Toast 实例全锚在窗口底部同一位置，不互斥就会重叠
+        qml/ToastBus.qml
         qml/LiveFullscreen.qml
         qml/StreamLogPanel.qml
         qml/DevicePicker.qml

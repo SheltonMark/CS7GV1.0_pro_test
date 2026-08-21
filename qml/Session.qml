@@ -88,7 +88,9 @@ QtObject {
     signal autoAdvanced(string deviceName)
     signal autoAdvanceExhausted(string reason)
 
-    function advanceStation(station) {
+    // silent=true：调用方自己会发一条更具体的提示，这里就不要再发通用的那条
+    //（否则两条 toast 同时出现、内容还重复 —— 保留信息更全的那条）。
+    function advanceStation(station, silent) {
         if (!station || station.length === 0)
             return "";
         const cur = CloudClient.deviceName;
@@ -115,7 +117,8 @@ QtObject {
 
         CloudClient.deviceName = next;
         CloudClient.refreshInfo();   // 顺手拿设备真值校正进度，也刷新页面上的信息
-        autoAdvanced(next);
+        if (silent !== true)
+            autoAdvanced(next);      // 这个信号只负责弹通用提示，见 Main.qml
         return next;
     }
 
