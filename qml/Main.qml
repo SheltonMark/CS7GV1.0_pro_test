@@ -217,14 +217,6 @@ ApplicationWindow {
             Behavior on opacity { NumberAnimation { duration: Theme.durSlow } }
         }
 
-        // 账号授权（管的是角色，不是密码 —— 密码在腾达安防云）。
-        // 与设备无关，型号不符也不禁用。
-        ViewAccounts {
-            anchors.fill: parent
-            visible: stack.index === stack.stations.length + 3
-            opacity: visible ? 1 : 0
-            Behavior on opacity { NumberAnimation { duration: Theme.durSlow } }
-        }
 
         Component { id: focusPage;    ViewFocus {} }
         Component { id: semiPage;     ViewFinished { semi: true } }

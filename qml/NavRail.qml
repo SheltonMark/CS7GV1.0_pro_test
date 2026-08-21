@@ -27,16 +27,18 @@ Rectangle {
         out.push({ key: "批次文件", sub: "导入/导出", icon: Icons.save, pending: false });
         out.push({ key: "关于", sub: "版本", icon: Icons.navAbout, pending: false });
         out.push({ key: "云调试", sub: "链路", icon: Icons.cloud, pending: false });
-        out.push({ key: "账号", sub: "授权", icon: Icons.person, pending: false });
         return out;
     }
 
-    // 非工位页索引:批次文件、关于、云调试、账号依次排在工位之后。
+    // 非工位页索引:批次文件、关于、云调试依次排在工位之后。
     // ⚠️ 这些索引是按位置算的，往 entries 里增删项必须同步改这里和 Main 的挂载条件。
+    //
+    // 账号管理**不在这里** —— 左侧栏是工位导航，账号不是工位；而且它该在选产品之前
+    // 就能用（换批次时顺手加个人），不该等进了工位主界面（2026-08-21 用户定）。
+    // 入口在 ProductGate 的"账号管理"。
     readonly property int batchIndex: stations.length
     readonly property int aboutIndex: stations.length + 1
     readonly property int debugIndex: stations.length + 2
-    readonly property int accountsIndex: stations.length + 3
 
     // 坑 2:单例属性初始化不能调自定义函数 —— 此处 rail 是普通组件不是单例，
     // 且 entries 是绑定表达式而非单例属性初始化，安全。
@@ -374,49 +376,6 @@ Rectangle {
             }
         }
 
-        // 账号授权页。工程师能管技术员、超级用户能管所有人 ——
-        // canManageTech（= role !== "tech"）正好是这个门，技术员看不到。
-        // ⚠️ 同 debugCell：只控 visible，不从 entries 里去掉（索引按位置算）。
-        Item {
-            id: acctCell
-            visible: Session.canManageTech
-            width: parent.width
-            height: visible ? 50 : 0
-
-            readonly property bool active: rail.currentIndex === rail.accountsIndex
-
-            Rectangle {
-                anchors.fill: parent
-                anchors.leftMargin: Theme.s2
-                anchors.rightMargin: Theme.s2
-                radius: Theme.radius
-                color: acctCell.active ? Theme.brandWash
-                       : (acctHover.hovered ? Qt.rgba(1, 1, 1, 0.05) : "transparent")
-                Behavior on color { ColorAnimation { duration: Theme.durFast } }
-            }
-            HoverHandler { id: acctHover }
-            TapHandler { onTapped: rail.currentIndex = rail.accountsIndex }
-
-            Column {
-                anchors.centerIn: parent
-                spacing: 2
-                Icon {
-                    text: Icons.person
-                    size: 16
-                    color: acctCell.active ? Theme.brand
-                           : (acctHover.hovered ? Theme.textSecondary : Theme.textDim)
-                    anchors.horizontalCenter: parent.horizontalCenter
-                }
-                Text {
-                    text: "账号"
-                    color: acctCell.active ? Theme.textPrimary
-                           : (acctHover.hovered ? Theme.textSecondary : Theme.textDim)
-                    font.family: TypeScale.family
-                    font.pointSize: TypeScale.caption
-                    anchors.horizontalCenter: parent.horizontalCenter
-                }
-            }
-        }
 
         Text {
             text: typeof appVersion !== "undefined" ? "v" + appVersion : "dev"

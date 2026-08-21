@@ -87,6 +87,7 @@ QVariantList AccountStore::accounts() const
             {QStringLiteral("phoneMask"), a.phoneMask},
             {QStringLiteral("role"), a.role},
             {QStringLiteral("name"), a.name},
+            {QStringLiteral("products"), a.products},   // 空 = 全部型号
         });
     }
     return out;
@@ -136,6 +137,34 @@ QString AccountStore::upsert(const QString &phone, const QString &name,
         accounts_[i] = a;
     else
         accounts_.append(a);
+    save();
+    emit accountsChanged();
+    return QString();
+}
+
+bool AccountStore::allowsProduct(const QString &phoneMask,
+                                 const QString &profileName) const
+{
+    const int i = indexOfMask(phoneMask);
+    if (i < 0)
+        return false;
+    const Account &a = accounts_.at(i);
+    // 超级用户/工程师不受型号限制：他们要能进任意型号配测试项、排障。
+    // 型号范围是给技术员用的 —— "这个人只做 CS6G 这条线"。
+    if (a.role != QLatin1String("tech"))
+        return true;
+    if (a.products.isEmpty())
+        return true;                 // 空 = 全部型号（默认）
+    return a.products.contains(profileName);
+}
+
+QString AccountStore::setProducts(const QString &phoneMask,
+                                  const QStringList &profileNames)
+{
+    const int i = indexOfMask(phoneMask);
+    if (i < 0)
+        return QStringLiteral("账号不存在");
+    accounts_[i].products = profileNames;
     save();
     emit accountsChanged();
     return QString();
@@ -217,6 +246,11 @@ void AccountStore::load()
         a.phoneMask = o.value(QStringLiteral("phoneMask")).toString();
         a.role = o.value(QStringLiteral("role")).toString();
         a.name = o.value(QStringLiteral("name")).toString();
+        for (const QJsonValue &p : o.value(QStringLiteral("products")).toArray()) {
+            const QString pid = p.toString();
+            if (!pid.isEmpty())
+                a.products.append(pid);
+        }
         if (!a.phoneHash.isEmpty() && RoleValid(a.role))
             accounts_.append(a);
     }
@@ -226,11 +260,15 @@ void AccountStore::save()
 {
     QJsonArray arr;
     for (const Account &a : accounts_) {
+        QJsonArray prods;
+        for (const QString &pid : a.products)
+            prods.append(pid);
         arr.append(QJsonObject{
             {QStringLiteral("phoneHash"), a.phoneHash},
             {QStringLiteral("phoneMask"), a.phoneMask},
             {QStringLiteral("role"), a.role},
             {QStringLiteral("name"), a.name},
+            {QStringLiteral("products"), prods},   // 空数组 = 全部型号
         });
     }
     // QSaveFile：写一半断电不会留下损坏的 JSON —— 授权表损坏等于所有人登不进去

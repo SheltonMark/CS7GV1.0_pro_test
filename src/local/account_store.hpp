@@ -2,6 +2,7 @@
 
 #include <QObject>
 #include <QString>
+#include <QStringList>
 #include <QVariantList>
 #include <QVariantMap>
 #include <QtQml/qqmlregistration.h>
@@ -46,6 +47,14 @@ public:
     // 增/改。phone 已存在 = 改姓名/角色。返回空串 = 成功，否则是给界面的错误原因。
     Q_INVOKABLE QString upsert(const QString &phone, const QString &name,
                                const QString &role);
+    // 某账号能不能操作这个型号（按型号名，理由见 Account.products 注释）。
+    // 空 = 全部型号。超级用户/工程师不受限 —— 他们要能进任意型号配测试项、排障。
+    Q_INVOKABLE bool allowsProduct(const QString &phoneMask,
+                                   const QString &profileName) const;
+    // 改某账号的型号范围（空列表 = 全部型号）
+    Q_INVOKABLE QString setProducts(const QString &phoneMask,
+                                    const QStringList &profileNames);
+
     // 改已有账号的姓名/角色，按**掩码**定位。
     // ⚠️ 必须有这个接口，不能拿掩码去调 upsert：upsert 会对传入的字符串算哈希，
     //    而掩码（138****8000）的哈希与原号不同 —— 那样会新增一条而不是修改。
@@ -68,6 +77,13 @@ private:
         QString phoneMask;
         QString role;      // super | engineer | tech
         QString name;
+        // 允许操作的**型号名**列表（如 "CS7GV1.0"）。**空 = 全部型号**（默认，
+        // 用户 2026-08-21 定）。
+        // 用"空=全部"而不是"列全部"：新增型号时不用回头给每个账号补一遍，漏补就等于
+        // 把人挡在新型号外面，而且没人会想到去查账号表。
+        // ⚠️ 键是型号名不是 productId：现有两个型号共用同一个 productId（CS6G 暂借
+        //    CS7G 的），按 productId 授权会"授一个送一个"。
+        QStringList products;
     };
 
     static QString hashPhone(const QString &phone);

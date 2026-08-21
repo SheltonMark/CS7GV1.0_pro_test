@@ -35,7 +35,10 @@ QtObject {
     readonly property bool canDebugPanel:      canSkipItem
     readonly property bool canManageTech:      canSkipItem
     readonly property bool canManageEngineer:  isSuper
-    readonly property bool canEditProfile:     isSuper
+    // 改产品要测哪些项：工程师也给（2026-08-21 用户定）。工程师本来就能"某项失败时
+    // 放行"（canSkipItem），那是逐台放宽判据；能勾选测试项只是把同一件事前置成批量
+    // 配置 —— 两者担责层级相同，没有理由只给后者留给超级用户。
+    readonly property bool canEditProfile:     canSkipItem
     readonly property bool canEditCredentials: isSuper
 
     function roleLabel() {

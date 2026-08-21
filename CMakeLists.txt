@@ -143,6 +143,10 @@ qt_add_qml_module(app_ptest
         # xp2p_info 用 —— 所以 cloud_config.json 里不需要账号密码。
         src/local/operator_login.hpp
         src/local/operator_login.cpp
+        # 产品型号表。原先硬编码在 MockData.qml，加型号要改 QML 重新构建 —— 产线做
+        # 不到。现在落 profiles.json，超级用户/工程师在产品选择页直接加。
+        src/local/profile_store.hpp
+        src/local/profile_store.cpp
         # 云链路层（2026-08-17 起）：CloudClient 是 QML 单例入口，指令串行 +
         # RequestId 闭环；传输可切换（Mock / 腾讯云 API3.0 直连），由 exe 同目录
         # cloud_config.json 决定，密钥文件不进 git。

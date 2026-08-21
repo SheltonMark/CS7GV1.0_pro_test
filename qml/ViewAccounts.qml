@@ -15,6 +15,9 @@ import QtQuick.Layouts
 Item {
     id: root
 
+    // 装在 ProductGate 的对话框里，需要一个关闭出口
+    signal closeRequested()
+
     // 当前登录者能授予的角色。工程师不能造出工程师/超级用户 —— 否则等于自己提权。
     readonly property var grantableRoles: Session.canManageEngineer
         ? [{ key: "super", label: "超级用户" },
@@ -279,10 +282,16 @@ Item {
                 Layout.fillWidth: true
                 text: Session.canManageEngineer
                       ? "你是超级用户，可授予任意角色"
-                      : "你是工程师，只能添加/管理技术员"
+                      : "你是工程师，只能添加/管理技术员（造不出工程师或超级用户）"
                 color: Theme.textDim
                 font.family: TypeScale.family
                 font.pointSize: TypeScale.caption
+            }
+
+            AppButton {
+                text: "关闭"
+                Layout.preferredWidth: 96
+                onClicked: root.closeRequested()
             }
         }
     }
@@ -295,6 +304,9 @@ Item {
         property var editing: null
         readonly property bool isNew: editing === null
 
+        // 勾选中的型号名。空对象 = 全部型号（默认）
+        property var pickedModels: ({})
+
         function openFor(item) {
             editing = item;
             phoneField.text = item ? item.phoneMask : "";
@@ -306,8 +318,21 @@ Item {
                 if (!item && root.grantableRoles[i].key === "tech") { idx = i; break; }
             }
             roleBox.currentIndex = idx;
+            // 回填型号范围（accounts() 里带 products；空 = 全部）
+            const picked = {};
+            if (item && item.products !== undefined) {
+                for (let i = 0; i < item.products.length; ++i)
+                    picked[item.products[i]] = true;
+            }
+            pickedModels = picked;
             hint.text = "";
             open();
+        }
+
+        // 当前是否"全部型号"（没勾任何一个 = 全部）
+        readonly property bool allModels: {
+            for (const k in pickedModels) return false;
+            return true;
         }
 
         title: isNew ? "添加账号" : "编辑账号"
@@ -351,6 +376,20 @@ Item {
                 hint.text = err;
                 return;
             }
+
+            // 型号范围（只对技术员有意义；工程师/超级用户在 allowsProduct 里恒放行）。
+            // 新增时掩码要现算 —— upsert 存的是哈希，界面这边只有原号。
+            const models = [];
+            for (const k in editDialog.pickedModels)
+                models.push(k);
+            const mask = editDialog.isNew ? AccountStore.maskPhone(phone)
+                                          : editDialog.editing.phoneMask;
+            const err2 = AccountStore.setProducts(mask, models);
+            if (err2.length > 0) {
+                hint.text = err2;
+                return;
+            }
+
             toast.show(editDialog.isNew ? "已添加 " + name : "已更新 " + name, true);
             editDialog.close();
         }
@@ -416,16 +455,74 @@ Item {
                 font.pointSize: TypeScale.body
             }
 
+            // ── 型号范围：只对技术员显示 ──────────────────────────────────
+            // 工程师/超级用户不受限（allowsProduct 恒放行），摆出来只会造成
+            // "勾了却不生效"的困惑。
+            Text {
+                visible: modelScope.visible
+                Layout.fillWidth: true
+                text: "可操作的型号（一个不勾 = 全部型号）"
+                color: Theme.textDim
+                font.family: TypeScale.family
+                font.pointSize: TypeScale.caption
+            }
+            Flow {
+                id: modelScope
+                visible: root.grantableRoles[roleBox.currentIndex] !== undefined
+                         && root.grantableRoles[roleBox.currentIndex].key === "tech"
+                Layout.fillWidth: true
+                spacing: Theme.s3
+
+                Repeater {
+                    model: ProfileStore.profiles
+
+                    CheckBox {
+                        required property var modelData
+                        text: modelData.name
+                        checked: editDialog.pickedModels[modelData.name] === true
+                        onToggled: {
+                            // 改对象要整体重赋值，QML 侦测不到深层属性变化
+                            const next = {};
+                            for (const k in editDialog.pickedModels)
+                                next[k] = editDialog.pickedModels[k];
+                            if (checked)
+                                next[modelData.name] = true;
+                            else
+                                delete next[modelData.name];
+                            editDialog.pickedModels = next;
+                        }
+                    }
+                }
+            }
+            Text {
+                visible: modelScope.visible
+                Layout.fillWidth: true
+                text: editDialog.allModels
+                      ? "当前：全部型号（含以后新增的）"
+                      : "当前：仅勾选的型号 —— 该技术员的产品选择页只会出现这些"
+                color: Theme.textSecondary
+                font.family: TypeScale.family
+                font.pointSize: TypeScale.caption
+                wrapMode: Text.WordWrap
+            }
+
             Text {
                 Layout.fillWidth: true
                 text: {
                     const k = root.grantableRoles[roleBox.currentIndex]
                               ? root.grantableRoles[roleBox.currentIndex].key : "tech";
+                    // 三层权限的准确口径（对应 Session 里的位）：
+                    //   canEditProfile = isSuper      改产品要测哪些项
+                    //   canSkipItem    = 非技术员      某项测出 fail 时放行
+                    //   无限制                         执行产测流程
                     if (k === "super")
-                        return "可管理所有账号、编辑产品配置、用云调试页。";
+                        return "全部权限：可勾选产品的测试项、可放行失败项、"
+                               + "可导出批次、可用云调试页、可管理所有账号。";
                     if (k === "engineer")
-                        return "可跳过测试项、导出批次、用云调试页、管理技术员。";
-                    return "只能执行产测流程 —— 不能跳过测试项，看不到云调试页。";
+                        return "可放行测试失败的项、导出批次、用云调试页、管理技术员。"
+                               + "不能勾选产品的测试项（那只有超级用户能改）。";
+                    return "只能执行产测流程。某项测不过时只能重测或转维修，"
+                           + "不能放行；看不到云调试页与本页。";
                 }
                 color: Theme.textSecondary
                 font.family: TypeScale.family

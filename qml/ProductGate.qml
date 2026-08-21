@@ -10,10 +10,31 @@ import QtQuick.Layouts
 Item {
     id: gate
 
+    // 当前登录者可选的型号。技术员可以被限定只做某几个型号（账号管理页里设，
+    // 空 = 全部）；工程师/超级用户不受限，他们要能进任意型号配测试项、排障。
+    readonly property var visibleProfiles: {
+        const all = ProfileStore.profiles;
+        if (!Session.user || Session.canManageTech)
+            return all;                      // 非技术员：全部可见
+        const mask = Session.user.phoneMask !== undefined ? Session.user.phoneMask : "";
+        const out = [];
+        for (let i = 0; i < all.length; ++i) {
+            // 按型号名过滤，不是 productId —— 两个型号现在共用同一个 productId，
+            // 按 id 过滤会"授一个送一个"
+            if (AccountStore.allowsProduct(mask, all[i].name))
+                out.push(all[i]);
+        }
+        return out;
+    }
+
     // 开发用:--autoselect 跳过启动门直接进首个可用产品(自动化/联调方便)
     Component.onCompleted: {
-        if (Qt.application.arguments.indexOf("--autoselect") >= 0)
-            Session.profile = MockData.profiles.find(p => p.enabled) || null
+        if (Qt.application.arguments.indexOf("--autoselect") >= 0) {
+            const list = gate.visibleProfiles;
+            for (let i = 0; i < list.length; ++i) {
+                if (list[i].enabled) { Session.profile = list[i]; break; }
+            }
+        }
     }
 
     Rectangle { anchors.fill: parent; color: Theme.bg }
@@ -50,7 +71,9 @@ Item {
         }
 
         Repeater {
-            model: MockData.profiles
+            // 型号来自 ProfileStore（profiles.json），不再是 MockData 里的硬编码 ——
+            // 加型号不用重新构建。技术员只看到被授权的型号（见 visibleProfiles）。
+            model: gate.visibleProfiles
 
             Rectangle {
                 id: card
@@ -69,8 +92,10 @@ Item {
 
                 HoverHandler { id: hh; enabled: card.usable }
                 TapHandler {
-                    // 悬停在"测试项"按钮上时禁掉整卡点击,防止点按钮误选中产品
-                    enabled: card.usable && !cfgHover.hovered
+                    // 悬停在卡内任一管理按钮上时禁掉整卡点击，防止点按钮误选中产品。
+                    // ⚠️ 新增按钮都要加进这个条件 —— 漏一个就会"点按钮顺带把产品选了"，
+                    //    而选产品是锁定会话的动作，误触代价大。
+                    enabled: card.usable && !cfgHover.hovered && !editHover.hovered
                     onTapped: Session.profile = card.modelData
                 }
 
@@ -137,10 +162,11 @@ Item {
                     }
 
                     // 管理员动作(需求① 2026-08-17):配置本产品准成品/成品的
-                    // 测试项勾选。普通角色不可见。
+                    // 测试项勾选。技术员不可见 —— 用 canEditProfile 而不是 isSuper，
+                    // 工程师也有这个权限（2026-08-21 用户定）。
                     AppButton {
                         id: cfgBtn
-                        visible: card.usable && Session.isSuper
+                        visible: card.usable && Session.canEditProfile
                         text: "测试项"
                         glyph: Icons.navFinished
                         implicitHeight: Theme.hit - 12
@@ -148,6 +174,20 @@ Item {
                         onClicked: itemCfg.openFor(card.modelData)
                         // 悬停感知放按钮内部:用于禁掉整卡点击,防误选产品
                         HoverHandler { id: cfgHover }
+                    }
+
+                    // 改型号本身（名称/ProductId/能力位）。与"测试项"分开：
+                    // 前者是型号定义，后者是本工位测哪些项 —— 两件事、两个存储
+                    //（profiles.json vs factory_config.json）。
+                    AppButton {
+                        id: editBtn
+                        visible: Session.canEditProfile
+                        text: "型号"
+                        glyph: Icons.device
+                        implicitHeight: Theme.hit - 12
+                        Layout.alignment: Qt.AlignVCenter
+                        onClicked: addDialog.openFor(card.modelData)
+                        HoverHandler { id: editHover }
                     }
 
                     // 待建模产品可见但置灰(规则6):看得见"它在计划里",选不进坏会话
@@ -178,33 +218,75 @@ Item {
             }
         }
 
-        // 新增入口:普通工人不可编辑 profile,入口只指路
-        Rectangle {
+        // 管理入口行。账号管理放这儿而**不是**登录后弹模态框（2026-08-21 讨论）：
+        // 模态框每班次都弹，工人很快会条件反射地关掉，而管理员真要用时它已经关了；
+        // 这一页本来就是登录后第一屏，且已有"测试项"这类管理动作，放同一处不新增
+        // 概念，也不打断流程 —— 要用就点，不用就走。技术员看不到账号入口。
+        RowLayout {
             Layout.fillWidth: true
-            height: 52
-            radius: Theme.radiusLg
-            color: "transparent"
-            border.width: 1
-            border.color: Theme.borderSoft
+            spacing: Theme.s3
 
-            HoverHandler { id: addHover }
-            TapHandler { onTapped: addDialog.open() }
+            // 新增型号。技术员看不到 —— canEditProfile 现在含工程师（用户 2026-08-21 定）
+            Rectangle {
+                Layout.fillWidth: true
+                visible: Session.canEditProfile
+                height: 52
+                radius: Theme.radiusLg
+                color: "transparent"
+                border.width: 1
+                border.color: addHover.hovered ? Theme.border : Theme.borderSoft
 
-            Row {
-                anchors.centerIn: parent
-                spacing: Theme.s2
-                Icon {
-                    text: Icons.add
-                    size: 14
-                    color: addHover.hovered ? Theme.textSecondary : Theme.textDim
-                    anchors.verticalCenter: parent.verticalCenter
+                HoverHandler { id: addHover }
+                TapHandler { onTapped: addDialog.openFor(null) }
+
+                Row {
+                    anchors.centerIn: parent
+                    spacing: Theme.s2
+                    Icon {
+                        text: Icons.add
+                        size: 14
+                        color: addHover.hovered ? Theme.textSecondary : Theme.textDim
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
+                    Text {
+                        text: "新增型号"
+                        color: addHover.hovered ? Theme.textSecondary : Theme.textDim
+                        font.family: TypeScale.family
+                        font.pointSize: TypeScale.body
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
                 }
-                Text {
-                    text: "新增产品"
-                    color: addHover.hovered ? Theme.textSecondary : Theme.textDim
-                    font.family: TypeScale.family
-                    font.pointSize: TypeScale.body
-                    anchors.verticalCenter: parent.verticalCenter
+            }
+
+            // 账号管理：canManageTech = 非技术员
+            Rectangle {
+                Layout.fillWidth: true
+                visible: Session.canManageTech
+                height: 52
+                radius: Theme.radiusLg
+                color: "transparent"
+                border.width: 1
+                border.color: acctHover.hovered ? Theme.border : Theme.borderSoft
+
+                HoverHandler { id: acctHover }
+                TapHandler { onTapped: acctDialog.open() }
+
+                Row {
+                    anchors.centerIn: parent
+                    spacing: Theme.s2
+                    Icon {
+                        text: Icons.person
+                        size: 14
+                        color: acctHover.hovered ? Theme.textSecondary : Theme.textDim
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
+                    Text {
+                        text: "账号管理"
+                        color: acctHover.hovered ? Theme.textSecondary : Theme.textDim
+                        font.family: TypeScale.family
+                        font.pointSize: TypeScale.body
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
                 }
             }
         }
@@ -219,22 +301,251 @@ Item {
         }
     }
 
+    // 账号管理。整页塞进对话框：这件事与"选产品"无关，不该占产品选择页的版面，
+    // 也不该进主界面左侧栏（那是工位导航，账号不是工位）。
+    Dialog {
+        id: acctDialog
+        modal: true
+        anchors.centerIn: Overlay.overlay
+        width: Math.min(920, Overlay.overlay ? Overlay.overlay.width - 80 : 920)
+        height: Math.min(640, Overlay.overlay ? Overlay.overlay.height - 80 : 640)
+        padding: 0
+        closePolicy: Popup.CloseOnEscape
+
+        background: Rectangle {
+            color: Theme.bg
+            border.color: Theme.border
+            border.width: 1
+            radius: Theme.radiusLg
+        }
+
+        ViewAccounts {
+            anchors.fill: parent
+            onCloseRequested: acctDialog.close()
+        }
+    }
+
+    // 新增/编辑型号。原先这里只是一句"由管理员维护 profiles/*.json"的指路 ——
+    // 而那个文件从来没做，加型号只能改 QML 重新构建。现在真能加了（落 profiles.json）。
     Dialog {
         id: addDialog
-        title: "新增产品"
-        modal: true
-        anchors.centerIn: parent
-        standardButtons: Dialog.Ok
 
-        Text {
-            width: 360
-            text: "产品 profile 随软件发布、由管理员维护：安装目录 profiles/*.json"
-                + "（productId / 显示名 / 固定测试项集合 / 工装卡模板）。"
-                + "普通工位电脑不提供编辑入口。"
-            color: Theme.textPrimary
-            font.family: TypeScale.family
-            font.pointSize: TypeScale.body
-            wrapMode: Text.WordWrap
+        // null = 新增；否则改这一条
+        property var editing: null
+        readonly property bool isNew: editing === null
+        // 勾选中的测试项位。用对象当集合，QML 里没有 Set 的稳定支持。
+        property var pickedItems: ({})
+
+        function openFor(p) {
+            editing = p;
+            nameF.text = p ? p.name : "";
+            descF.text = p ? p.desc : "";
+            pidF.text = p ? p.productId : "";
+            enabledBox.checked = p ? p.enabled === true : true;
+            rtspBox.checked = p ? p.focusRtsp === true : false;
+            const picked = {};
+            const src = p ? p.items : [0, 2, 4, 5, 6, 7, 8, 9, 10];  // 新增默认给现有型号那套
+            for (let i = 0; i < src.length; ++i)
+                picked[src[i]] = true;
+            pickedItems = picked;
+            addHint.text = "";
+            open();
+        }
+
+        function submit() {
+            const items = [];
+            const all = ProfileStore.allItems();
+            for (let i = 0; i < all.length; ++i) {
+                if (addDialog.pickedItems[all[i].bit])
+                    items.push(all[i].bit);
+            }
+            const err = ProfileStore.upsert({
+                name: nameF.text.trim(),
+                desc: descF.text.trim(),
+                productId: pidF.text.trim(),
+                enabled: enabledBox.checked,
+                focusRtsp: rtspBox.checked,
+                items: items,
+                // 工位序列沿用默认（现有两个型号完全一致）。要按型号改工位顺序是
+                // 另一件事，界面上先不开 —— 开了就得处理"工位 key 必须是已实现的
+                // 那几个"这类校验，不值得在这一版做。
+                stations: addDialog.isNew ? ProfileStore.defaultStations()
+                                          : addDialog.editing.stations
+            });
+            if (err.length > 0) {
+                addHint.text = err;
+                return;
+            }
+            addDialog.close();
+        }
+
+        title: isNew ? "新增产品型号" : "编辑型号"
+        modal: true
+        anchors.centerIn: Overlay.overlay
+        width: 520
+        closePolicy: Popup.CloseOnEscape
+
+        background: Rectangle {
+            color: Theme.surface
+            border.color: Theme.border
+            border.width: 1
+            radius: Theme.radiusLg
+        }
+
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: Theme.s3
+
+            GridLayout {
+                Layout.fillWidth: true
+                columns: 2
+                columnSpacing: Theme.s3
+                rowSpacing: Theme.s2
+
+                Text {
+                    text: "型号名"
+                    color: Theme.textDim
+                    font.family: TypeScale.family
+                    font.pointSize: TypeScale.caption
+                }
+                TextField {
+                    id: nameF
+                    Layout.fillWidth: true
+                    // 型号名是身份键，也是 SN 的型号段 —— 改名等于换一条 profile
+                    enabled: addDialog.isNew
+                    placeholderText: "如 CS7GV1.0（也是 SN 的型号段）"
+                    font.family: "Consolas"
+                    font.pointSize: TypeScale.body
+                }
+
+                Text {
+                    text: "说明"
+                    color: Theme.textDim
+                    font.family: TypeScale.family
+                    font.pointSize: TypeScale.caption
+                }
+                TextField {
+                    id: descF
+                    Layout.fillWidth: true
+                    placeholderText: "如 低功耗电池 IPC · 带网口"
+                    font.pointSize: TypeScale.body
+                }
+
+                Text {
+                    text: "ProductId"
+                    color: Theme.textDim
+                    font.family: TypeScale.family
+                    font.pointSize: TypeScale.caption
+                }
+                TextField {
+                    id: pidF
+                    Layout.fillWidth: true
+                    placeholderText: "腾讯云 IoT Explorer 的 ProductId"
+                    font.family: "Consolas"
+                    font.pointSize: TypeScale.body
+                }
+            }
+
+            Text {
+                Layout.fillWidth: true
+                text: "ProductId 决定设备名单、产测指令与云拉流都指向哪个产品 —— 填错会"
+                      + "整条链路不通。现有两个型号暂时共用同一个（CS6G 正式 id 未到）。"
+                color: Theme.textDim
+                font.family: TypeScale.family
+                font.pointSize: TypeScale.caption
+                wrapMode: Text.WordWrap
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: Theme.s4
+
+                CheckBox {
+                    id: enabledBox
+                    text: "可选（取消则卡片置灰）"
+                }
+                CheckBox {
+                    id: rtspBox
+                    text: "调焦可走 RTSP（有网口）"
+                }
+            }
+
+            Text {
+                Layout.fillWidth: true
+                text: "本型号支持的外设测试项"
+                color: Theme.textDim
+                font.family: TypeScale.family
+                font.pointSize: TypeScale.caption
+            }
+
+            Flow {
+                Layout.fillWidth: true
+                spacing: Theme.s3
+
+                Repeater {
+                    model: ProfileStore.allItems()
+
+                    CheckBox {
+                        required property var modelData
+                        text: modelData.label
+                        checked: addDialog.pickedItems[modelData.bit] === true
+                        onToggled: {
+                            // 改对象要整体重赋值，QML 不会侦测到深层属性变化
+                            const next = {};
+                            for (const k in addDialog.pickedItems)
+                                next[k] = addDialog.pickedItems[k];
+                            if (checked)
+                                next[modelData.bit] = true;
+                            else
+                                delete next[modelData.bit];
+                            addDialog.pickedItems = next;
+                        }
+                    }
+                }
+            }
+
+            Text {
+                id: addHint
+                Layout.fillWidth: true
+                visible: text.length > 0
+                color: Theme.fail
+                font.family: TypeScale.family
+                font.pointSize: TypeScale.caption
+                wrapMode: Text.WordWrap
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                Layout.topMargin: Theme.s2
+                spacing: Theme.s3
+
+                AppButton {
+                    visible: !addDialog.isNew && ProfileStore.profiles.length > 1
+                    text: "删除型号"
+                    kind: "danger"
+                    Layout.preferredWidth: 116
+                    onClicked: {
+                        const err = ProfileStore.remove(addDialog.editing.name);
+                        if (err.length > 0)
+                            addHint.text = err;
+                        else
+                            addDialog.close();
+                    }
+                }
+                Item { Layout.fillWidth: true }
+                AppButton {
+                    text: "取消"
+                    Layout.preferredWidth: 96
+                    onClicked: addDialog.close()
+                }
+                AppButton {
+                    text: addDialog.isNew ? "添加" : "保存"
+                    glyph: Icons.save
+                    kind: "primary"
+                    Layout.preferredWidth: 116
+                    onClicked: addDialog.submit()
+                }
+            }
         }
     }
 

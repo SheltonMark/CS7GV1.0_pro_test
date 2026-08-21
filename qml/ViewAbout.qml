@@ -7,6 +7,8 @@ import QtQuick.Layouts
 Item {
     id: root
 
+    Toast { id: upgradeToast }
+
     // 一键跳企业微信。wxwork:// 协议已注册(实测)，但"直接打开某人会话"
     // 没有稳定的公开 deep-link 格式，各版本行为不一致。
     // 所以：跳转是尽力而为，工号始终摆在旁边可复制 —— 兜底路径必须永远可用。
@@ -193,6 +195,51 @@ Item {
                         Layout.fillWidth: true
                         label: "构建类型"
                         value: typeof buildType !== "undefined" ? buildType : "—"
+                    }
+                }
+            }
+
+            // ---- 在线升级（工厂需求 2026-08-21：不再逐台手工拷包）----
+            // ⚠️ 只有 UI，检查/下载/替换还没实现 —— 按钮点了给"暂未开通"提示。
+            //    真正的实现要解决三件事：exe 不能覆盖运行中的自己（要独立 updater）、
+            //    358MB 全量太重（要按清单差分）、升级包防篡改（要验签）。
+            Card {
+                title: "在线升级"
+                fitContent: true
+                Layout.fillWidth: true
+                Layout.leftMargin: Theme.s5
+                Layout.rightMargin: Theme.s5
+
+                RowLayout {
+                    anchors { left: parent.left; right: parent.right; top: parent.top }
+                    spacing: Theme.s4
+
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 2
+
+                        Text {
+                            text: "当前 " + (typeof appVersion !== "undefined"
+                                             ? "v" + appVersion : "dev")
+                                  + " · 已是最新"
+                            color: Theme.textPrimary
+                            font.family: TypeScale.family
+                            font.pointSize: TypeScale.body
+                            font.weight: TypeScale.weightMedium
+                        }
+                        Text {
+                            text: "升级源与自动更新尚未开通 —— 新版本仍由管理员分发"
+                            color: Theme.textDim
+                            font.family: TypeScale.family
+                            font.pointSize: TypeScale.caption
+                        }
+                    }
+
+                    AppButton {
+                        text: "检查更新"
+                        glyph: Icons.reset
+                        Layout.preferredWidth: 136
+                        onClicked: upgradeToast.show("在线升级暂未开通，敬请期待", true)
                     }
                 }
             }
