@@ -100,6 +100,13 @@ QString FactoryConfig::rtspUrlTemplate() const
     return topString("rtspUrlTemplate", "rtsp://%1:554/tenda");
 }
 
+QString FactoryConfig::updateSource() const
+{
+    // 默认空 = 在线升级未开通。工厂在 factory_config.json 里填内网共享目录
+    //（UNC 路径），各工位 PC 从那里比对差异、只拉变化的文件。
+    return topString("updateSource", "");
+}
+
 // —— 调焦设备发现(端口/搜索字按老 CP3 源码 DlgFocusing.cpp 核实)
 // PC→设备 广播端口(SENT_UDP_PORT_BROAD)
 int FactoryConfig::discoverySendPort() const { return topInt("discoverySendPort", 7320); }

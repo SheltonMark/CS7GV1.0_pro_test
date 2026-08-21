@@ -37,6 +37,9 @@ class FactoryConfig : public QObject {
     // —— 调焦 RTSP 直连(带网口产品,如 CS7GV1.0):%1 = 设备 IP。
     //    RTSP 比上云快,但只有调焦工位能插网线(其余工位已套壳)。
     Q_PROPERTY(QString rtspUrlTemplate READ rtspUrlTemplate NOTIFY configChanged)
+    // 在线升级源：工厂内网共享目录（UNC 路径，如 \\192.168.1.10\ptest_update）。
+    // 空 = 未开通，关于页的"检查更新"会提示先配置。
+    Q_PROPERTY(QString updateSource READ updateSource NOTIFY configChanged)
     // —— 调焦设备发现(CP3 老协议 UDP 广播搜索,DeviceDiscovery 用)
     Q_PROPERTY(int discoverySendPort READ discoverySendPort NOTIFY configChanged)
     Q_PROPERTY(int discoveryListenPort READ discoveryListenPort NOTIFY configChanged)
@@ -61,6 +64,7 @@ public:
     int ledBlinkMs() const;
     int speakerRepeat() const;
     QString rtspUrlTemplate() const;
+    QString updateSource() const;
     int discoverySendPort() const;
     int discoveryListenPort() const;
     QString discoveryWord() const;

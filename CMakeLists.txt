@@ -5,7 +5,7 @@ cmake_minimum_required(VERSION 3.21)
 #
 # 版本号是产线工具的硬要求：界面要看得到，将来每条产测记录也要带上它，
 # 否则批量误判无法追溯是哪个版本干的。此处是唯一来源。
-project(ptest_pc_client VERSION 0.1.9 LANGUAGES CXX)
+project(ptest_pc_client VERSION 0.1.11 LANGUAGES CXX)
 
 find_package(Qt6 6.7 REQUIRED COMPONENTS Quick QuickControls2 Network Multimedia)
 
@@ -147,6 +147,10 @@ qt_add_qml_module(app_ptest
         # 不到。现在落 profiles.json，超级用户/工程师在产品选择页直接加。
         src/local/profile_store.hpp
         src/local/profile_store.cpp
+        # 在线升级：工厂内网共享目录做升级源（factory_config.json 的 updateSource），
+        # manifest 差分只拉变化的文件，apply 靠外部 cmd 脚本换文件再拉起新版。
+        src/local/update_client.hpp
+        src/local/update_client.cpp
         # 云链路层（2026-08-17 起）：CloudClient 是 QML 单例入口，指令串行 +
         # RequestId 闭环；传输可切换（Mock / 腾讯云 API3.0 直连），由 exe 同目录
         # cloud_config.json 决定，密钥文件不进 git。

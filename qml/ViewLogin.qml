@@ -48,6 +48,8 @@ Item {
             LocalSettings.setRememberedUserId(userField.text.trim(),
                                               rememberBox.checked);
             Session.user = user;
+            // 不需要在这里校验型号授权：退出登录会把 profile 一起清（Main.doLogout），
+            // 登录后必过产品选择页，过滤在那里自然生效 —— 别在两处维护同一道门。
         }
         function onFailed(reason) {
             root.error = reason;

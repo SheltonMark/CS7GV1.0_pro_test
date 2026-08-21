@@ -185,40 +185,6 @@ Rectangle {
                 anchors.leftMargin: Theme.s2
                 anchors.rightMargin: Theme.s2
                 radius: Theme.radius
-                color: suHover.hovered ? Qt.rgba(1, 1, 1, 0.05) : "transparent"
-                Behavior on color { ColorAnimation { duration: Theme.durFast } }
-            }
-            HoverHandler { id: suHover }
-            TapHandler { onTapped: rail.switchUser() }
-
-            Column {
-                anchors.centerIn: parent
-                spacing: 2
-                Icon {
-                    text: Icons.person
-                    size: 16
-                    color: suHover.hovered ? Theme.textSecondary : Theme.textDim
-                    anchors.horizontalCenter: parent.horizontalCenter
-                }
-                Text {
-                    text: "切换用户"
-                    color: suHover.hovered ? Theme.textSecondary : Theme.textDim
-                    font.family: TypeScale.family
-                    font.pointSize: TypeScale.caption
-                    anchors.horizontalCenter: parent.horizontalCenter
-                }
-            }
-        }
-
-        Item {
-            width: parent.width
-            height: 50
-
-            Rectangle {
-                anchors.fill: parent
-                anchors.leftMargin: Theme.s2
-                anchors.rightMargin: Theme.s2
-                radius: Theme.radius
                 color: swHover.hovered ? Qt.rgba(1, 1, 1, 0.05) : "transparent"
                 Behavior on color { ColorAnimation { duration: Theme.durFast } }
             }
@@ -376,6 +342,52 @@ Rectangle {
             }
         }
 
+
+        // 退出登录放**最底下**（2026-08-21 用户定）：它是整个侧栏里唯一"离开"
+        // 语义的动作，摆在工位项和其他入口中间容易误点；沉到底部与它们区分。
+        // 上面再加一条分隔线，明确"以下不是页面"。
+        Rectangle {
+            width: parent.width - Theme.s4 * 2
+            height: 1
+            color: Theme.borderSoft
+            anchors.horizontalCenter: parent.horizontalCenter
+        }
+
+        Item {
+            width: parent.width
+            height: 50
+
+            Rectangle {
+                anchors.fill: parent
+                anchors.leftMargin: Theme.s2
+                anchors.rightMargin: Theme.s2
+                radius: Theme.radius
+                color: suHover.hovered ? Qt.rgba(1, 1, 1, 0.05) : "transparent"
+                Behavior on color { ColorAnimation { duration: Theme.durFast } }
+            }
+            HoverHandler { id: suHover }
+            TapHandler { onTapped: rail.switchUser() }
+
+            Column {
+                anchors.centerIn: parent
+                spacing: 2
+                Icon {
+                    text: Icons.person
+                    size: 16
+                    color: suHover.hovered ? Theme.textSecondary : Theme.textDim
+                    anchors.horizontalCenter: parent.horizontalCenter
+                }
+                Text {
+                    // "退出登录"而不是"切换用户"：本来就没有用户列表可切，两者都是
+                    // 回登录页；登录现在是个人腾达云账号，退出登录是更诚实的叫法
+                    text: "退出登录"
+                    color: suHover.hovered ? Theme.textSecondary : Theme.textDim
+                    font.family: TypeScale.family
+                    font.pointSize: TypeScale.caption
+                    anchors.horizontalCenter: parent.horizontalCenter
+                }
+            }
+        }
 
         Text {
             text: typeof appVersion !== "undefined" ? "v" + appVersion : "dev"

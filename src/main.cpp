@@ -7,12 +7,17 @@
 #include <QDateTime>
 #include <QDir>
 #include <QGuiApplication>
+#include <QLockFile>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QQuickStyle>
 #include <QStyleHints>
 
 #include <cstdio>
+
+#ifdef Q_OS_WIN
+#include <windows.h>
+#endif
 
 namespace {
 
@@ -74,6 +79,23 @@ int main(int argc, char *argv[])
     app.setApplicationName(QStringLiteral("ProductTestTool"));
     app.setApplicationVersion(QStringLiteral(APP_VERSION));
     app.setOrganizationName(QStringLiteral("Tenda"));
+
+    // 单实例锁（按安装目录）。双开的实害：抢 7319 发现端口、各起一路 XP2P 会话、
+    // 内存里的账号/进度互相看不见（2026-08-21 升级实测撞上：脚本自动重启 + 人工
+    // 又开一个 = 双进程，账号列表看着"丢了"）。
+    // 锁放**安装目录**而不是全局：同一份安装防双开；不同目录的安装（开发 dist 与
+    // 测试拷贝并存）互不干扰 —— 那是有意的测试场景。
+    // QLockFile 自带陈锁检测（记 PID，崩溃残留会被自动接管），断电不会锁死。
+    QLockFile instanceLock(app.applicationDirPath() + QStringLiteral("/app.lock"));
+    if (!instanceLock.tryLock(100)) {
+#ifdef Q_OS_WIN
+        MessageBoxW(nullptr,
+                    L"产测工具已经在运行了。\n\n"
+                    L"升级后会自动重启，不需要手动再开一个。",
+                    L"CS7G Production Test Tool", MB_OK | MB_ICONINFORMATION);
+#endif
+        return 0;
+    }
 
     // 尽早装：越早重定向，越少日志漏在外面。必须在 QGuiApplication 之后
     // （要用 applicationDirPath）。

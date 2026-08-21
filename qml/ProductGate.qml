@@ -242,17 +242,20 @@ Item {
                 Row {
                     anchors.centerIn: parent
                     spacing: Theme.s2
+                    // 亮度/粗细对齐上方「测试项」按钮（textPrimary + Medium）：
+                    // 原先 textDim 太暗看不清（2026-08-21 反馈）。悬停效果不变。
                     Icon {
                         text: Icons.add
                         size: 14
-                        color: addHover.hovered ? Theme.textSecondary : Theme.textDim
+                        color: Theme.textPrimary
                         anchors.verticalCenter: parent.verticalCenter
                     }
                     Text {
                         text: "新增型号"
-                        color: addHover.hovered ? Theme.textSecondary : Theme.textDim
+                        color: Theme.textPrimary
                         font.family: TypeScale.family
                         font.pointSize: TypeScale.body
+                        font.weight: TypeScale.weightMedium
                         anchors.verticalCenter: parent.verticalCenter
                     }
                 }
@@ -274,19 +277,67 @@ Item {
                 Row {
                     anchors.centerIn: parent
                     spacing: Theme.s2
+                    // 同上：亮度/粗细对齐「测试项」，悬停效果不变
                     Icon {
                         text: Icons.person
                         size: 14
-                        color: acctHover.hovered ? Theme.textSecondary : Theme.textDim
+                        color: Theme.textPrimary
                         anchors.verticalCenter: parent.verticalCenter
                     }
                     Text {
                         text: "账号管理"
-                        color: acctHover.hovered ? Theme.textSecondary : Theme.textDim
+                        color: Theme.textPrimary
                         font.family: TypeScale.family
                         font.pointSize: TypeScale.body
+                        font.weight: TypeScale.weightMedium
                         anchors.verticalCenter: parent.verticalCenter
                     }
+                }
+            }
+        }
+
+        // 当前登录者 + 退出登录。放居中下方（2026-08-21 用户定）：顶部是品牌区，
+        // 底部本来就是管理动作地带。这块同时解决"登错账号的人被困在这页"——
+        // 原先这页没有任何退路。
+        //
+        // 按钮做成与上方「测试项」同等尺寸（用 AppButton，命中区 Theme.hit）：
+        // 换班每天都要点，之前那行小字太难瞄。样式用 normal 而不是 primary ——
+        // 一屏只该有一个主操作，那是"选产品"；悬停时边框转主题色（AppButton 的
+        // hover 语义），既醒目又不抢主操作的视觉位。
+        ColumnLayout {
+            Layout.alignment: Qt.AlignHCenter
+            Layout.topMargin: Theme.s4
+            spacing: Theme.s2
+
+            Row {
+                Layout.alignment: Qt.AlignHCenter
+                spacing: Theme.s2
+
+                Icon {
+                    text: Icons.person
+                    size: 13
+                    color: Theme.textDim
+                    anchors.verticalCenter: parent.verticalCenter
+                }
+                Text {
+                    text: (Session.user ? Session.user.name : "")
+                          + " · " + Session.roleLabel()
+                    color: Theme.textDim
+                    font.family: TypeScale.family
+                    font.pointSize: TypeScale.caption
+                    anchors.verticalCenter: parent.verticalCenter
+                }
+            }
+
+            AppButton {
+                Layout.alignment: Qt.AlignHCenter
+                Layout.preferredWidth: 176
+                text: "退出登录"
+                glyph: Icons.person
+                hoverAccent: true   // 悬停边框转主题色（2026-08-21 用户定）
+                onClicked: {
+                    OperatorLogin.logout();   // 清云身份 token
+                    Session.user = null;      // 回登录页；产品保留（工位属性）
                 }
             }
         }
@@ -297,7 +348,7 @@ Item {
             font.family: "Consolas"
             font.pointSize: TypeScale.caption
             Layout.alignment: Qt.AlignHCenter
-            Layout.topMargin: Theme.s5
+            Layout.topMargin: Theme.s2
         }
     }
 

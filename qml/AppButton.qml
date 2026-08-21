@@ -27,6 +27,11 @@ Button {
     // 不叫 icon —— Button 基类的 icon 是 FINAL 分组属性，同名声明直接组件加载失败
     property string glyph: ""
 
+    // 悬停时边框转主题色。默认关：全局所有 normal 按钮都这样会太吵，而且会削弱
+    // primary 的视觉优先级。给"低频但重要、又不该抢主操作位"的按钮单独开
+    //（如产品选择页的退出登录）。
+    property bool hoverAccent: false
+
     readonly property color _base: kind === "primary" ? Theme.brand
                                 : kind === "danger"  ? Qt.rgba(0.937, 0.267, 0.267, 0.12)
                                 : Theme.surfaceAlt
@@ -56,8 +61,11 @@ Button {
                : ctl.hovered ? ctl._hover
                : ctl._base
         border.width: 1
-        border.color: ctl.enabled ? ctl._edge : Theme.borderSoft
+        border.color: !ctl.enabled ? Theme.borderSoft
+                      : (ctl.hoverAccent && (ctl.hovered || ctl.pressed)) ? Theme.brand
+                      : ctl._edge
         Behavior on color { ColorAnimation { duration: Theme.durFast } }
+        Behavior on border.color { ColorAnimation { duration: Theme.durFast } }
     }
 
     contentItem: Item {

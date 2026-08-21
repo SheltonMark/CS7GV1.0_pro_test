@@ -196,13 +196,20 @@ Item {
                         label: "构建类型"
                         value: typeof buildType !== "undefined" ? buildType : "—"
                     }
+                    FieldRow {
+                        Layout.fillWidth: true
+                        // 一台机器可能同时存在多个安装（开发 dist / 测试拷贝），
+                        // 排"账号怎么不见了"这类问题第一步就是确认在哪个安装里
+                        label: "安装目录"
+                        value: typeof applicationDirPath !== "undefined"
+                               ? applicationDirPath : "—"
+                    }
                 }
             }
 
             // ---- 在线升级（工厂需求 2026-08-21：不再逐台手工拷包）----
-            // ⚠️ 只有 UI，检查/下载/替换还没实现 —— 按钮点了给"暂未开通"提示。
-            //    真正的实现要解决三件事：exe 不能覆盖运行中的自己（要独立 updater）、
-            //    358MB 全量太重（要按清单差分）、升级包防篡改（要验签）。
+            // 源 = factory_config.json 的 updateSource（内网共享目录），
+            // manifest 差分只拉变化的文件。流程与边界见 update_client.hpp 头注。
             Card {
                 title: "在线升级"
                 fitContent: true
@@ -210,36 +217,144 @@ Item {
                 Layout.leftMargin: Theme.s5
                 Layout.rightMargin: Theme.s5
 
-                RowLayout {
+                ColumnLayout {
                     anchors { left: parent.left; right: parent.right; top: parent.top }
-                    spacing: Theme.s4
+                    spacing: Theme.s3
 
-                    ColumnLayout {
+                    RowLayout {
                         Layout.fillWidth: true
-                        spacing: 2
+                        spacing: Theme.s4
 
-                        Text {
-                            text: "当前 " + (typeof appVersion !== "undefined"
-                                             ? "v" + appVersion : "dev")
-                                  + " · 已是最新"
-                            color: Theme.textPrimary
-                            font.family: TypeScale.family
-                            font.pointSize: TypeScale.body
-                            font.weight: TypeScale.weightMedium
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: 2
+
+                            Text {
+                                text: {
+                                    const cur = "当前 " + (typeof appVersion !== "undefined"
+                                                           ? "v" + appVersion : "dev");
+                                    switch (UpdateClient.state) {
+                                    case UpdateClient.Checking:
+                                        return cur + " · 正在检查…";
+                                    case UpdateClient.UpToDate:
+                                        return cur + " · 已是最新";
+                                    case UpdateClient.Available:
+                                        return cur + " → 可升级到 v" + UpdateClient.remoteVersion
+                                               + "（" + UpdateClient.diffCount + " 个文件，"
+                                               + (UpdateClient.diffBytes / 1048576).toFixed(1)
+                                               + " MB）";
+                                    case UpdateClient.Downloading:
+                                        return "正在下载 v" + UpdateClient.remoteVersion
+                                               + "…";   // 百分比在下方进度条上，别两处重复
+                                    case UpdateClient.Staged:
+                                        return "v" + UpdateClient.remoteVersion
+                                               + " 已就绪 —— 安装会关闭软件并自动重启";
+                                    case UpdateClient.Error:
+                                        return cur;
+                                    default:
+                                        return cur;
+                                    }
+                                }
+                                color: UpdateClient.state === UpdateClient.Staged
+                                       ? Theme.brand : Theme.textPrimary
+                                font.family: TypeScale.family
+                                font.pointSize: TypeScale.body
+                                font.weight: TypeScale.weightMedium
+                                // 占满可用宽 + 自动换行："可升级到 vX（N 个文件…）"
+                                // 那行长，不换行会把按钮挤出卡片
+                                Layout.fillWidth: true
+                                wrapMode: Text.WordWrap
+                            }
+                            Text {
+                                // 只在出错时占一行；平时不放说明文字（用户 2026-08-21 定）
+                                visible: UpdateClient.state === UpdateClient.Error
+                                text: UpdateClient.errorText
+                                color: Theme.fail
+                                font.family: TypeScale.family
+                                font.pointSize: TypeScale.caption
+                                wrapMode: Text.WordWrap
+                                Layout.fillWidth: true
+                            }
                         }
-                        Text {
-                            text: "升级源与自动更新尚未开通 —— 新版本仍由管理员分发"
-                            color: Theme.textDim
-                            font.family: TypeScale.family
-                            font.pointSize: TypeScale.caption
+
+                        AppButton {
+                            text: {
+                                switch (UpdateClient.state) {
+                                case UpdateClient.Checking:    return "检查中…";
+                                case UpdateClient.Available:   return "下载更新";
+                                case UpdateClient.Downloading: return "下载中…";
+                                case UpdateClient.Staged:      return "安装并重启";
+                                default:                       return "检查更新";
+                                }
+                            }
+                            glyph: UpdateClient.state === UpdateClient.Staged
+                                   ? Icons.play : Icons.reset
+                            kind: UpdateClient.state === UpdateClient.Staged
+                                  ? "primary" : "normal"
+                            enabled: UpdateClient.state !== UpdateClient.Checking
+                                     && UpdateClient.state !== UpdateClient.Downloading
+                            Layout.preferredWidth: 136
+                            onClicked: {
+                                switch (UpdateClient.state) {
+                                case UpdateClient.Available: UpdateClient.download(); break;
+                                case UpdateClient.Staged:    UpdateClient.apply(); break;
+                                default:                     UpdateClient.check(); break;
+                                }
+                            }
                         }
                     }
 
-                    AppButton {
-                        text: "检查更新"
-                        glyph: Icons.reset
-                        Layout.preferredWidth: 136
-                        onClicked: upgradeToast.show("在线升级暂未开通，敬请期待", true)
+                    // 下载进度。自绘而不用样式的 ProgressBar：FluentWinUI3 的条又细
+                    // 又浅，工位屏幕上瞟不清 —— 这里要的是"隔一米能看到升到哪了"。
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        visible: UpdateClient.state === UpdateClient.Downloading
+                        spacing: Theme.s1
+
+                        RowLayout {
+                            Layout.fillWidth: true
+
+                            Text {
+                                text: Math.round(UpdateClient.progress * 100) + "%"
+                                color: Theme.brand
+                                font.family: "Consolas"
+                                font.pointSize: TypeScale.body
+                                font.weight: TypeScale.weightBold
+                            }
+                            Item { Layout.fillWidth: true }
+                            Text {
+                                // 已下 / 总量，工人能估还要等多久
+                                text: (UpdateClient.progress * UpdateClient.diffBytes
+                                       / 1048576).toFixed(1)
+                                      + " / "
+                                      + (UpdateClient.diffBytes / 1048576).toFixed(1)
+                                      + " MB"
+                                color: Theme.textDim
+                                font.family: "Consolas"
+                                font.pointSize: TypeScale.caption
+                            }
+                        }
+
+                        // 轨道 + 圆角填充。宽度变化加缓动，逐文件跳变不显得卡顿。
+                        Rectangle {
+                            id: dlTrack
+                            Layout.fillWidth: true
+                            height: 10
+                            radius: 5
+                            color: Theme.bgDeep
+                            border.width: 1
+                            border.color: Theme.borderSoft
+
+                            Rectangle {
+                                anchors { left: parent.left; top: parent.top; bottom: parent.bottom }
+                                anchors.margins: 2
+                                // 起步就给一点宽度：0% 时全空看着像没在动
+                                width: Math.max(6, (dlTrack.width - 4) * UpdateClient.progress)
+                                radius: 3
+                                color: Theme.brand
+                                Behavior on width { NumberAnimation { duration: Theme.durFast } }
+                            }
+                        }
                     }
                 }
             }

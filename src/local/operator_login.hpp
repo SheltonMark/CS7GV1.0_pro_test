@@ -35,6 +35,10 @@ public:
     // 发起登录。结果走 succeeded/failed 信号 —— 云端往返要 1~3 秒，不能同步等。
     Q_INVOKABLE void login(const QString &phone, const QString &password);
 
+    // 退出登录：清掉进程级云身份 token。**必须调**，不能只清 Session.user ——
+    // 登录 token 供取拉流票据用，不清等于"已退出的人的云身份"还在被软件使用。
+    Q_INVOKABLE void logout();
+
 signals:
     void busyChanged();
     // user = { id(掩码), name, role, phoneMask }，可直接赋给 Session.user

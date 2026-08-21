@@ -19,6 +19,12 @@ void OperatorLogin::setBusy(bool value)
     emit busyChanged();
 }
 
+void OperatorLogin::logout()
+{
+    TendaCloudClient::clearSessionToken();
+    StreamLog::append(QStringLiteral("[登录] 已退出登录（云身份已清除）"));
+}
+
 void OperatorLogin::login(const QString &phone, const QString &password)
 {
     const QString p = phone.trimmed();

@@ -27,6 +27,15 @@ ApplicationWindow {
     readonly property bool mismatch: Session.profile !== null
         && MockData.deviceProductId !== Session.profile.productId
 
+    // 退出登录的实际动作（NavRail 触发；ProductGate 上 profile 本来就是空，
+    // 自己调 OperatorLogin.logout 即可）。user 与 profile 都清 —— 见 onSwitchUser。
+    function doLogout() {
+        OperatorLogin.logout();   // 清云身份 token（登录 token 供拉流票据用）
+        Xp2pClient.stop();        // 单例不随 Loader 销毁，云会话要显式收
+        Session.profile = null;   // 先清 profile：连带清批次（onProfileChanged）
+        Session.user = null;
+    }
+
     // 启动流程 = 操作者登录 → 产品选择门 → 工位主界面
     ViewLogin {
         anchors.fill: parent
@@ -68,7 +77,20 @@ ApplicationWindow {
                 }
                 anchors { left: parent.left; top: parent.top; bottom: parent.bottom }
                 onSwitchProduct: switchDialog.open()
-                onSwitchUser: Session.user = null   // 保 profile,回登录页即换班
+                // 退出登录 = 整个会话结束：user 和 profile 都清，登录后必过产品
+                // 选择页（按权限过滤）。曾保留 profile 想给"换班"省一步 —— 收回：
+                // 批次数据本来就不跨重启（内存态），保留只是造出"重启丢、退出不丢"
+                // 的特例；而且保留会绕过型号授权门（2026-08-21 用户定案）。
+                onSwitchUser: {
+                    // 批次没测完时误点的代价是重导 InputData1 —— 只在这种时候才
+                    // 弹确认；做完一批/没导批次就直接走，不加日常摩擦。
+                    if (Session.batchRecords.length > 0
+                        && Session.batchDoneCount < Session.batchRecords.length) {
+                        logoutDialog.open();
+                    } else {
+                        win.doLogout();
+                    }
+                }
             }
 
             TopBar {
@@ -118,6 +140,29 @@ ApplicationWindow {
                 // 没有下一台：全做完 / 剩下的都离线。两种处置完全不同，文案已分开。
                 function onAutoAdvanceExhausted(reason) {
                     rosterToast.show(reason, true, 6000);
+                }
+            }
+
+            // 退出登录的确认。只在"批次没测完"时被打开（见 onSwitchUser）——
+            // 这时误点的代价是重导 InputData1，值得拦一下。
+            Dialog {
+                id: logoutDialog
+                title: "退出登录？"
+                modal: true
+                anchors.centerIn: parent
+                standardButtons: Dialog.Ok | Dialog.Cancel
+                onAccepted: win.doLogout()
+
+                Text {
+                    width: 340
+                    text: "本批还有 "
+                          + (Session.batchRecords.length - Session.batchDoneCount)
+                          + " 台未完成。退出登录会清空已导入的批次数据，"
+                          + "下次登录后需要重新导入 InputData1。"
+                    color: Theme.textPrimary
+                    font.family: TypeScale.family
+                    font.pointSize: TypeScale.body
+                    wrapMode: Text.WordWrap
                 }
             }
 

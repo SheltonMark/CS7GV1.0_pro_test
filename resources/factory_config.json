@@ -1,5 +1,7 @@
 {
   "_说明": "工厂配置。随包发在 ProductTestTool.exe 同目录，产线可直接改；缺键用软件内置默认值。stationItems（各产品各工位的测试项勾选）由管理员在软件内配置后自动写入本文件。",
+  "_updateSource说明": "在线升级源 = 工厂内网共享目录（UNC 用正斜杠写，JSON 里反斜杠要转义容易错）。下面是占位示例，等工厂发来真实路径后改这一行再发版。升级永不覆盖本文件。",
+  "updateSource": "//192.168.1.10/ptest_update",
   "shutdownDelaySec": 120,
   "pollIntervalMs": 500,
   "heartbeatTimeoutSec": 15,
