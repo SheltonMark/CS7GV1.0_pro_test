@@ -103,6 +103,8 @@ qt_add_qml_module(app_ptest
         qml/ViewBatchFiles.qml
         qml/ViewAbout.qml
         qml/ViewCloudDebug.qml
+        # 账号授权页（管角色，不管密码 —— 密码在腾达安防云）
+        qml/ViewAccounts.qml
         qml/ProductGate.qml
         qml/ViewLogin.qml
     SOURCES

@@ -141,6 +141,32 @@ QString AccountStore::upsert(const QString &phone, const QString &name,
     return QString();
 }
 
+QString AccountStore::updateByMask(const QString &phoneMask, const QString &name,
+                                   const QString &role)
+{
+    if (name.trimmed().isEmpty())
+        return QStringLiteral("姓名不能为空");
+    if (!RoleValid(role))
+        return QStringLiteral("角色无效");
+
+    const int i = indexOfMask(phoneMask);
+    if (i < 0)
+        return QStringLiteral("账号不存在");
+
+    // 同 upsert：不许把最后一个超级用户降级，否则管理页进不去了
+    if (accounts_.at(i).role == QLatin1String("super")
+        && role != QLatin1String("super") && superCount() <= 1) {
+        return QStringLiteral("至少要保留一个超级用户");
+    }
+
+    // 只改姓名与角色，phoneHash/phoneMask 原样保留
+    accounts_[i].name = name.trimmed();
+    accounts_[i].role = role;
+    save();
+    emit accountsChanged();
+    return QString();
+}
+
 QString AccountStore::remove(const QString &phoneMask)
 {
     // 按掩码删：界面上只有掩码（哈希不给 QML，少一处泄露面）。

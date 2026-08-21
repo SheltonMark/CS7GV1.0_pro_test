@@ -6,11 +6,8 @@
   "productId": "5KHBENFCX2",
   "deviceName": "1000000003",
 
-  "_tenda说明": "云拉流（CS6GV2.0 等无网口产品的调焦）取 xp2p_info 用。二选一：填 account/password（腾达安防云账号，软件自动登录取票据，票据每次拉流都变，会自动续），或把腾讯云后台/小程序里那串 xp2pInfo 直接粘到下面先验链路。两个都空则云拉流不可用，按钮会提示缺配置。",
+  "_tenda说明": "整段可省。云拉流取 xp2p_info 用的是**登录者自己的腾达云身份**（工人在软件里登录后自动生效），所以这里不再需要账号密码。domain 不填就用默认的 cn-cloud.tenda.com.cn。xp2pInfo 只在排障时用：把腾讯云后台那串手工粘进来可以跳过登录直接验拉流链路（票据几分钟就过期）。",
   "tenda": {
-    "domain": "https://cn-cloud.tenda.com.cn",
-    "account": "",
-    "password": "",
     "xp2pInfo": ""
   }
 }

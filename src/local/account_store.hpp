@@ -46,6 +46,13 @@ public:
     // 增/改。phone 已存在 = 改姓名/角色。返回空串 = 成功，否则是给界面的错误原因。
     Q_INVOKABLE QString upsert(const QString &phone, const QString &name,
                                const QString &role);
+    // 改已有账号的姓名/角色，按**掩码**定位。
+    // ⚠️ 必须有这个接口，不能拿掩码去调 upsert：upsert 会对传入的字符串算哈希，
+    //    而掩码（138****8000）的哈希与原号不同 —— 那样会新增一条而不是修改。
+    //    手机号本身不可改（表里只有哈希，原号取不回来），要换号只能移出再添加。
+    Q_INVOKABLE QString updateByMask(const QString &phoneMask, const QString &name,
+                                     const QString &role);
+
     // 删。⚠️ 拒绝删掉最后一个超级用户 —— 否则管理页再也进不去，产线上等于要重装。
     Q_INVOKABLE QString remove(const QString &phoneMask);
 
