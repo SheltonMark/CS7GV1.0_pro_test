@@ -49,9 +49,34 @@ public:
     // 有手工粘贴值时直接回它；否则按需登录后请求，token 失效会自动重登一次。
     void fetchXp2pInfo(const QString &productKey, const QString &sn, Handler done);
 
+    // 验证任意一对账号密码。ok=false 时 error 是给工人看的中文原因。
+    // keepAsSession=true 时把拿到的 token 存进**进程级共享槽**（见 sessionToken）——
+    // 操作者登录成功后就该这样：之后取票据一律用登录者的 token。
+    void verifyCredential(const QString &account, const QString &password,
+                          bool keepAsSession,
+                          std::function<void(bool ok, const QString &error)> done);
+
+    // ── 进程级共享的登录 token ─────────────────────────────────────────────
+    // 为什么要共享：OperatorLogin 与 Xp2pClient 各持一个 TendaCloudClient 实例，
+    // 而"谁登录"和"取票据"必须用同一个 token —— 工人登录后，取票据就走他的身份，
+    // cloud_config.json 里再也不需要账号密码（2026-08-21 用户定案）。
+    //
+    // 实测前提：p2pToken 接口**不校验设备归属** —— 台面这台设备并没有绑在
+    // cloud_config.json 那个账号名下，票据照样取得到。所以换成工人的 token 一样能取。
+    static QString sessionToken();
+    static void setSessionToken(const QString &token);
+    static void clearSessionToken();
+
 private:
-    // 账号密码换 access_token：check/v2 拿 encrypt_mode，再 password/v2
+    // 账号密码换 access_token：check/v2 拿 encrypt_mode，再 password/v2。
+    // 用 cloud_config.json 里配的那对凭据，成功后缓存 access_token_。
     void login(std::function<void(bool ok, const QString &error)> done);
+    // 上面两者的共同实现。
+    //   keepToken     —— 存进本实例的 access_token_（取票据链自己的缓存）
+    //   keepAsSession —— 存进进程级共享槽（操作者登录用，供取票据认身份）
+    void doLogin(const QString &account, const QString &password, bool keepToken,
+                 bool keepAsSession,
+                 std::function<void(bool ok, const QString &error)> done);
     void requestP2pToken(const QString &productKey, const QString &sn,
                          bool allowRelogin, Handler done);
 

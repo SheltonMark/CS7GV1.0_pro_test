@@ -10,6 +10,7 @@
 
 #include "stream_log.hpp"
 
+
 namespace {
 
 // 与 exe 同目录，和 factory_config.json 一样是"现场可看可删"的文件。

@@ -3,6 +3,8 @@
 #include <QCoreApplication>
 #include <QCryptographicHash>
 #include <QDateTime>
+#include <QMutex>
+#include <QMutexLocker>
 #include <QFile>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -14,6 +16,12 @@
 #include "stream_log.hpp"
 
 namespace {
+
+// 进程级共享的登录 token。工人/工程师登录成功后存进来，取票据一律用它。
+// 加锁：登录在主线程，取票据的回调也在主线程，但 Xp2pClient 的 SDK 回调线程也可能
+// 间接读到 —— 加锁比"大概不会撞"可靠，成本可忽略。
+QString g_sessionToken;
+QMutex g_sessionTokenMutex;
 
 // 接口固定盐，参考实现 UIDefine.h:50 原文注释"接口固定的sigsalt，适用于获取
 // 主账号，登录"。不是密钥，是全端一致的公开常量。
@@ -141,9 +149,17 @@ void TendaCloudClient::applyHeaders(QNetworkRequest &request, bool withApp,
         request.setRawHeader("AppSource", "TENDA-SECURITY");
         request.setRawHeader("AppVersion", kPcVersion);
     }
-    if (withAuth && !access_token_.isEmpty()) {
-        request.setRawHeader("Authorization",
-                             QByteArray("Bearer ") + access_token_.toUtf8());
+    if (withAuth) {
+        // 优先用**登录者**的 token（工人/工程师登录腾达云时存进共享槽）。
+        // 这样 cloud_config.json 里不再需要账号密码 —— 实测 p2pToken 不校验设备
+        // 归属，登录者的身份一样取得到票据（2026-08-21 用户确认：台面这台设备并没有
+        // 绑在配置里那个账号名下）。
+        // 退回本实例的 access_token_ 只为兼容"配了固定账号"的老配置。
+        const QString token = sessionToken().isEmpty() ? access_token_ : sessionToken();
+        if (!token.isEmpty()) {
+            request.setRawHeader("Authorization",
+                                 QByteArray("Bearer ") + token.toUtf8());
+        }
     }
     request.setTransferTimeout(kHttpTimeoutMs);
 }
@@ -159,8 +175,15 @@ void TendaCloudClient::fetchXp2pInfo(const QString &productKey, const QString &s
         done(true, manual_info_);
         return;
     }
+    // 登录者的 token 就够了 —— 不需要 cloud_config.json 里的账号密码。
+    // 这是常态路径：工人一登录软件就有了身份。
+    if (!sessionToken().isEmpty()) {
+        requestP2pToken(productKey, sn, false, std::move(done));
+        return;
+    }
     if (account_.isEmpty() || password_.isEmpty()) {
-        done(false, configHint());
+        done(false, QStringLiteral("尚未登录腾达云 —— 退出重新登录即可"
+                                   "（或在 cloud_config.json 配 tenda.account/password）"));
         return;
     }
     if (access_token_.isEmpty()) {
@@ -177,21 +200,57 @@ void TendaCloudClient::fetchXp2pInfo(const QString &productKey, const QString &s
     requestP2pToken(productKey, sn, true, done);
 }
 
+QString TendaCloudClient::sessionToken()
+{
+    QMutexLocker lock(&g_sessionTokenMutex);
+    return g_sessionToken;
+}
+
+void TendaCloudClient::setSessionToken(const QString &token)
+{
+    QMutexLocker lock(&g_sessionTokenMutex);
+    g_sessionToken = token;
+}
+
+void TendaCloudClient::clearSessionToken()
+{
+    QMutexLocker lock(&g_sessionTokenMutex);
+    g_sessionToken.clear();
+}
+
 void TendaCloudClient::login(std::function<void(bool, const QString &)> done)
+{
+    // keepAsSession=false：配置里那个固定账号只服务取票据这条链，不该冒充"登录者"
+    doLogin(account_, password_, true, false, std::move(done));
+}
+
+void TendaCloudClient::verifyCredential(const QString &account, const QString &password,
+                                        bool keepAsSession,
+                                        std::function<void(bool, const QString &)> done)
+{
+    // keepToken=false：不存进本实例的 access_token_（那是取票据链自己的缓存）。
+    // keepAsSession 决定要不要存进进程级共享槽 —— 两者是不同的东西，别混。
+    doLogin(account, password, false, keepAsSession, std::move(done));
+}
+
+void TendaCloudClient::doLogin(const QString &account, const QString &password,
+                               bool keepToken, bool keepAsSession,
+                               std::function<void(bool, const QString &)> done)
 {
     // 第一步 check/v2：拿主账号和 encrypt_mode。密码加盐用的是**服务端回的**
     // phone/email，不是用户输入的原文（参考实现 RequestManage.cpp:177-184），
     // 手机号登录而账号库存的是邮箱时，盐必须跟着服务端走。
-    const bool isEmail = account_.contains(QLatin1Char('@'));
+    const bool isEmail = account.contains(QLatin1Char('@'));
     QJsonObject body;
-    body.insert(isEmail ? QStringLiteral("email") : QStringLiteral("phone"), account_);
+    body.insert(isEmail ? QStringLiteral("email") : QStringLiteral("phone"), account);
 
     QNetworkRequest request(QUrl(domain_ + QLatin1String(kPathCheck)));
     applyHeaders(request, false, false);
 
     QNetworkReply *reply =
         nam_.post(request, QJsonDocument(body).toJson(QJsonDocument::Compact));
-    connect(reply, &QNetworkReply::finished, this, [this, reply, isEmail, done]() {
+    connect(reply, &QNetworkReply::finished, this,
+            [this, reply, isEmail, password, keepToken, keepAsSession, done]() {
         reply->deleteLater();
         int code = -1;
         QString msg;
@@ -219,7 +278,7 @@ void TendaCloudClient::login(std::function<void(bool, const QString &)> done)
             login.insert(QStringLiteral("email"), QString());
         }
         const QString encrypted =
-            QString::fromLatin1(EncryptAccountPassword(saltUser, password_));
+            QString::fromLatin1(EncryptAccountPassword(saltUser, password));
         login.insert(QStringLiteral("password"), encrypted);
         login.insert(QStringLiteral("se_password"), encrypted);
         login.insert(QStringLiteral("terminal"), terminal_);
@@ -239,23 +298,34 @@ void TendaCloudClient::login(std::function<void(bool, const QString &)> done)
         applyHeaders(req, true, false);
         QNetworkReply *r2 =
             nam_.post(req, QJsonDocument(login).toJson(QJsonDocument::Compact));
-        connect(r2, &QNetworkReply::finished, this, [this, r2, done]() {
+        connect(r2, &QNetworkReply::finished, this,
+                [this, r2, keepToken, keepAsSession, done]() {
             r2->deleteLater();
             int c = -1;
             QString m;
             const QJsonObject d = ParseEnvelope(r2->readAll(), &c, &m);
             if (c != 0) {
-                done(false, QStringLiteral("腾达云登录失败 code=%1 %2").arg(c).arg(m));
+                // 密码错的业务码要单独给一句人话 —— 工人看 code 看不懂
+                const QString hint = (c == 100404 || c == 100405 || c == 100406)
+                    ? QStringLiteral("（密码不正确）") : QString();
+                done(false, QStringLiteral("腾达云登录失败 code=%1 %2%3")
+                                .arg(c).arg(m, hint));
                 return;
             }
-            access_token_ = d.value(QStringLiteral("access_token")).toString();
-            if (access_token_.isEmpty()) {
+            const QString token = d.value(QStringLiteral("access_token")).toString();
+            if (token.isEmpty()) {
                 done(false, QStringLiteral("腾达云登录成功但没回 access_token"));
                 return;
             }
+            if (keepToken)
+                access_token_ = token;
+            if (keepAsSession)
+                setSessionToken(token);   // 之后取票据一律用登录者的身份
             // 纪律：只报长度，绝不落 token 本身
-            StreamLog::append(QStringLiteral("[腾达云] 登录成功，access_token 长度 %1")
-                                  .arg(access_token_.size()));
+            StreamLog::append(QStringLiteral("[腾达云] 登录成功，access_token 长度 %1%2")
+                                  .arg(token.size())
+                                  .arg(keepAsSession ? QStringLiteral("（已作为会话身份）")
+                                                     : QString()));
             done(true, QString());
         });
     });
@@ -283,6 +353,16 @@ void TendaCloudClient::requestP2pToken(const QString &productKey, const QString 
         int code = -1;
         QString msg;
         const QJsonObject data = ParseEnvelope(reply->readAll(), &code, &msg);
+
+        // 用登录者身份时 token 过期没法自动重登（我们不存工人的密码，这正是这套
+        // 方案的意义）。给一句工人能照做的话，而不是抛业务码。
+        if ((code == kCodeTokenExpired || code == kCodeTokenBad)
+            && !sessionToken().isEmpty()) {
+            StreamLog::append(QStringLiteral("[腾达云] 登录身份已过期 code=%1").arg(code));
+            clearSessionToken();
+            done(false, QStringLiteral("腾达云登录已过期 —— 请退出后重新登录"));
+            return;
+        }
 
         // token 过期/无效：清掉重登一次再试，只给一次机会，避免打循环
         if ((code == kCodeTokenExpired || code == kCodeTokenBad) && allowRelogin) {

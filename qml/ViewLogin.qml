@@ -3,26 +3,26 @@ import ptest
 import QtQuick.Controls
 import QtQuick.Layouts
 
-// 操作者登录(启动第一屏)。身份分层:这里登录的是"操作者"(工号+角色,本地离线库),
-// 与软件连云的腾达后台账号无关(那是软件级凭证,超级用户在设置页配置)。
+// 操作者登录（启动第一屏）。**用腾达安防云账号登录**（2026-08-21 定案）：
 //
-// mock:账户在 MockData.users 明文比对,仅供演示。真实实现(docs/plan P5):
-// SQLite 账户库 + PBKDF2-HMAC-SHA256 加盐哈希 + 失败节流(5次/30s) +
-// 记住工号(QSettings) + 首启强制创建超级用户。
+//   身份 —— 腾达云管。工人用自己的手机号+密码，人事已在维护这份数据，离职即失效，
+//           全产线所有 PC 同时生效，不需要逐台删账号。
+//   权限 —— 本地 accounts.json 管，只记"这个手机号是什么角色"，一个密码都不存。
+//
+// 登录成功后，这位登录者的 access_token 还会**供取 xp2p_info 用** ——
+// 所以 cloud_config.json 里不再需要账号密码（实测 p2pToken 不校验设备归属）。
+//
+// 腾达账号只能在手机 App 上注册（用户确认），所以未注册时只能提示去 App 注册，
+// 软件内做不了。
 Item {
     id: root
 
     property string error: ""
 
+    // 开发用:--autoselect 以超级用户直接登录(ProductGate 的同名参数接力跳过产品门)。
     // ⚠️ 一个对象只能有一个 Component.onCompleted —— 写两遍后者会**静默覆盖**前者
-    //    （不报错，只是前一个永远不执行）。两件事必须并在这里。
+    //    且不报错。以后要加初始化就并进这里，别再写第二个。
     Component.onCompleted: {
-        // 首启把早先写在 QML 里的三个账号迁成正式账号（沿用工号姓名，密码仍 1234），
-        // 之后一律走 accounts.json。产线已经在用这几个工号，换掉等于要重新培训。
-        AccountStore.migrateLegacyIfEmpty();
-
-        // 开发用:--autoselect 以超级用户直接登录(ProductGate 的同名参数接力跳过产品门)。
-        // 从账号库里挑一个超级用户，不再引用 MockData。
         if (Qt.application.arguments.indexOf("--autoselect") >= 0) {
             const list = AccountStore.accounts;
             for (let i = 0; i < list.length; ++i) {
@@ -35,18 +35,23 @@ Item {
     }
 
     function tryLogin() {
-        const id = userField.text.trim();
-        // 走账号库（PBKDF2 校验）。失败不区分"工号不存在"与"密码错" ——
-        // 区分开等于告诉试密码的人哪些工号有效。
-        const hit = AccountStore.verify(id, pwdField.text);
-        if (hit && hit.id !== undefined) {
-            root.error = "";
+        root.error = "";
+        // 异步：云端往返 1~3 秒。结果走 OperatorLogin 的 succeeded/failed 信号。
+        OperatorLogin.login(userField.text.trim(), pwdField.text);
+    }
+
+    Connections {
+        target: OperatorLogin
+        function onSucceeded(user) {
             pwdField.text = "";
-            // 登录成功才记工号：输错的不该被记住
-            LocalSettings.setRememberedUserId(id, rememberBox.checked);
-            Session.user = hit;    // 真实实现:此处还要记审计(登录事件)
-        } else {
-            root.error = "工号或密码不正确";
+            // 登录成功才记手机号：输错的不该被记住
+            LocalSettings.setRememberedUserId(userField.text.trim(),
+                                              rememberBox.checked);
+            Session.user = user;
+        }
+        function onFailed(reason) {
+            root.error = reason;
+            pwdField.text = "";   // 失败清密码，省得工人在错的基础上改
         }
     }
 
@@ -88,7 +93,7 @@ Item {
                 TextField {
                     id: userField
                     Layout.fillWidth: true
-                    placeholderText: "工号"
+                    placeholderText: "手机号（腾达安防云账号）"
                     // 上次登录的工号，来自本机 QSettings（当前用户注册表）。
                     // ⚠️ 早先这里写死 MockData.users[0].id —— 于是**谁打开都是那个
                     //    工号**，把软件包发给别人也一样（2026-08-21 反馈）。那不是
@@ -101,10 +106,40 @@ Item {
                 TextField {
                     id: pwdField
                     Layout.fillWidth: true
-                    placeholderText: "密码"
-                    echoMode: TextInput.Password
+                    placeholderText: "腾达安防云密码"
+                    // 按住眼睛看明文，松开回圆点。产线戴手套输密码容易错，
+                    // 但"点一下切换"会让明文一直留在屏上（旁边就是别人的工位）——
+                    // 按住才显示，手一松就没，不会忘记切回去。
+                    echoMode: eyeHold.pressed ? TextInput.Normal : TextInput.Password
                     font.pointSize: TypeScale.body
+                    // 给右侧眼睛让出位置，否则密码尾部会被图标压住
+                    rightPadding: eyeIcon.width + Theme.s4
                     onAccepted: root.tryLogin()
+
+                    Icon {
+                        id: eyeIcon
+                        anchors {
+                            right: parent.right
+                            rightMargin: Theme.s3
+                            verticalCenter: parent.verticalCenter
+                        }
+                        // 两个码位都验过在 Segoe Fluent Icons(Win11) 与
+                        // Segoe MDL2 Assets(Win10) 里都有真实字形（渲染比像素，
+                        // 不是只看 MeasureString）—— 见 Icons.qml 的说明
+                        text: eyeHold.pressed ? Icons.eyeOff : Icons.eye
+                        size: 16
+                        color: eyeHold.pressed ? Theme.brand
+                               : eyeHold.containsMouse ? Theme.textPrimary
+                               : Theme.textDim
+
+                        MouseArea {
+                            id: eyeHold
+                            anchors.fill: parent
+                            anchors.margins: -Theme.s2   // 命中区放大，戴手套也点得到
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                        }
+                    }
                 }
 
                 Text {
@@ -119,7 +154,7 @@ Item {
                     Layout.fillWidth: true
                     CheckBox {
                         id: rememberBox
-                        text: "记住工号"
+                        text: "记住手机号"
                         // 读本机设置，不再恒 true。取消勾选会把已存的工号抹掉
                         // （见 LocalSettings::setRememberedUserId）——"取消"就该是
                         // "别在这台机器上留我的工号"，只停止写入等于没取消。
@@ -131,11 +166,25 @@ Item {
                 }
 
                 AppButton {
-                    text: "登录"
+                    text: OperatorLogin.busy ? "正在验证…" : "登录"
                     glyph: Icons.person
                     kind: "primary"
+                    // 云端往返 1~3 秒，期间置灰防连点（OperatorLogin 内部也兜了一层）
+                    enabled: !OperatorLogin.busy
                     Layout.fillWidth: true
                     onClicked: root.tryLogin()
+                }
+
+                // 腾达账号只能在手机 App 上注册（用户确认），软件内做不了 ——
+                // 所以只给一句明确的指路，不做假的"注册"按钮。
+                Text {
+                    Layout.fillWidth: true
+                    text: "没有账号？请先用「腾达安防」手机 App 注册，"
+                          + "再让管理员把手机号加进本软件。"
+                    color: Theme.textDim
+                    font.family: TypeScale.family
+                    font.pointSize: TypeScale.caption
+                    wrapMode: Text.WordWrap
                 }
             }
         }

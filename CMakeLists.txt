@@ -137,6 +137,10 @@ qt_add_qml_module(app_ptest
         # 哈希没人能手算。不进 git，按 cloud_config.json 那套保护。
         src/local/account_store.hpp
         src/local/account_store.cpp
+        # 操作者登录：腾达云验身份 + 本地授权表查角色。登录者的 token 同时供取
+        # xp2p_info 用 —— 所以 cloud_config.json 里不需要账号密码。
+        src/local/operator_login.hpp
+        src/local/operator_login.cpp
         # 云链路层（2026-08-17 起）：CloudClient 是 QML 单例入口，指令串行 +
         # RequestId 闭环；传输可切换（Mock / 腾讯云 API3.0 直连），由 exe 同目录
         # cloud_config.json 决定，密钥文件不进 git。

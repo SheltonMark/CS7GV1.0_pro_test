@@ -4,18 +4,11 @@
 #include <QCryptographicHash>
 #include <QFile>
 #include <QJsonArray>
-#include <QMessageAuthenticationCode>
 #include <QJsonDocument>
 #include <QJsonObject>
-#include <QRandomGenerator>
 #include <QSaveFile>
-#include <QVariantMap>
 
 namespace {
-
-constexpr int kIterations = 200000;
-constexpr int kSaltBytes = 16;
-constexpr int kKeyBytes = 32;
 
 QString StorePath()
 {
@@ -28,6 +21,14 @@ bool RoleValid(const QString &role)
            || role == QLatin1String("tech");
 }
 
+// 预置管理员（2026-08-21 用户给定）。写死在这里而不是配置文件里：配置文件能被现场
+// 改，那等于谁都能给自己开管理员。换人就重新打包 —— 用户口径是几乎不换。
+struct Builtin { const char *phone; const char *name; const char *role; };
+constexpr Builtin kBuiltins[] = {
+    {"18868110537", "超级管理员", "super"},
+    {"18813932014", "工程师",     "engineer"},
+};
+
 } // namespace
 
 AccountStore::AccountStore(QObject *parent)
@@ -35,43 +36,36 @@ AccountStore::AccountStore(QObject *parent)
     , path_(StorePath())
 {
     load();
+    seedBuiltinsIfMissing();
 }
 
-// PBKDF2-HMAC-SHA256。Qt 没有现成的 PBKDF2，按 RFC 8018 手写 —— 只需要
-// dkLen <= hLen 的情形（32 字节），所以只算第一个块，不用拼接循环。
-QByteArray AccountStore::derive(const QString &password, const QByteArray &salt)
+QString AccountStore::hashPhone(const QString &phone)
 {
-    const QByteArray pwd = password.toUtf8();
-    QByteArray block = salt;
-    block.append(char(0)).append(char(0)).append(char(0)).append(char(1));  // INT(1)
-
-    QByteArray u = QMessageAuthenticationCode::hash(
-        block, pwd, QCryptographicHash::Sha256);
-    QByteArray result = u;
-    for (int i = 1; i < kIterations; ++i) {
-        u = QMessageAuthenticationCode::hash(u, pwd, QCryptographicHash::Sha256);
-        for (int j = 0; j < result.size(); ++j)
-            result[j] = result[j] ^ u[j];
-    }
-    return result.left(kKeyBytes);
+    return QString::fromLatin1(
+        QCryptographicHash::hash(phone.trimmed().toUtf8(),
+                                 QCryptographicHash::Sha256).toHex());
 }
 
-// 逐字节全比完再返回，不提前 break —— 提前退出会让比较耗时随"前几位对了多少"变化，
-// 那是可测量的侧信道。产线场景威胁不高，但这个写法不额外花成本。
-bool AccountStore::constantTimeEquals(const QByteArray &a, const QByteArray &b)
+QString AccountStore::maskPhone(const QString &phone)
 {
-    if (a.size() != b.size())
-        return false;
-    unsigned char diff = 0;
-    for (int i = 0; i < a.size(); ++i)
-        diff |= static_cast<unsigned char>(a[i] ^ b[i]);
-    return diff == 0;
+    const QString p = phone.trimmed();
+    if (p.size() < 7)
+        return p;                       // 短号/非手机号：原样显示，掩码没有意义
+    return p.left(3) + QStringLiteral("****") + p.right(4);
 }
 
-int AccountStore::indexOf(const QString &id) const
+int AccountStore::indexOfHash(const QString &hash) const
 {
     for (int i = 0; i < accounts_.size(); ++i)
-        if (accounts_.at(i).id == id)
+        if (accounts_.at(i).phoneHash == hash)
+            return i;
+    return -1;
+}
+
+int AccountStore::indexOfMask(const QString &mask) const
+{
+    for (int i = 0; i < accounts_.size(); ++i)
+        if (accounts_.at(i).phoneMask == mask)
             return i;
     return -1;
 }
@@ -90,69 +84,54 @@ QVariantList AccountStore::accounts() const
     QVariantList out;
     for (const Account &a : accounts_) {
         out.append(QVariantMap{
-            {QStringLiteral("id"), a.id},
-            {QStringLiteral("name"), a.name},
+            {QStringLiteral("phoneMask"), a.phoneMask},
             {QStringLiteral("role"), a.role},
+            {QStringLiteral("name"), a.name},
         });
     }
     return out;
 }
 
-bool AccountStore::empty() const
+QVariantMap AccountStore::authorize(const QString &phone) const
 {
-    return accounts_.isEmpty();
-}
-
-QVariantMap AccountStore::verify(const QString &id, const QString &password) const
-{
-    const int i = indexOf(id);
+    const int i = indexOfHash(hashPhone(phone));
     if (i < 0)
         return QVariantMap();
     const Account &a = accounts_.at(i);
-    if (!constantTimeEquals(derive(password, a.salt), a.hash))
-        return QVariantMap();
+    // id 用掩码：Session.user.id 会显示在顶栏，不该摆完整手机号
     return QVariantMap{
-        {QStringLiteral("id"), a.id},
+        {QStringLiteral("id"), a.phoneMask},
         {QStringLiteral("name"), a.name},
         {QStringLiteral("role"), a.role},
+        {QStringLiteral("phoneMask"), a.phoneMask},
     };
 }
 
-QString AccountStore::upsert(const QString &id, const QString &name,
-                             const QString &role, const QString &password)
+QString AccountStore::upsert(const QString &phone, const QString &name,
+                             const QString &role)
 {
-    const QString trimmedId = id.trimmed();
-    if (trimmedId.isEmpty())
-        return QStringLiteral("工号不能为空");
+    const QString p = phone.trimmed();
+    if (p.isEmpty())
+        return QStringLiteral("手机号不能为空");
     if (name.trimmed().isEmpty())
         return QStringLiteral("姓名不能为空");
     if (!RoleValid(role))
         return QStringLiteral("角色无效");
 
-    const int i = indexOf(trimmedId);
-    if (i < 0 && password.isEmpty())
-        return QStringLiteral("新建账号必须设密码");
+    const QString hash = hashPhone(p);
+    const int i = indexOfHash(hash);
 
-    // 不许把最后一个超级用户降级 —— 与 remove() 同一道门，否则管理界面进不去了
+    // 不许把最后一个超级用户降级 —— 与 remove() 同一道门
     if (i >= 0 && accounts_.at(i).role == QLatin1String("super")
         && role != QLatin1String("super") && superCount() <= 1) {
         return QStringLiteral("至少要保留一个超级用户");
     }
 
     Account a;
-    if (i >= 0)
-        a = accounts_.at(i);
-    a.id = trimmedId;
+    a.phoneHash = hash;
+    a.phoneMask = maskPhone(p);
     a.name = name.trimmed();
     a.role = role;
-    if (!password.isEmpty()) {
-        a.salt.resize(kSaltBytes);
-        QRandomGenerator::system()->generate(
-            reinterpret_cast<quint32 *>(a.salt.data()),
-            reinterpret_cast<quint32 *>(a.salt.data() + kSaltBytes));
-        a.hash = derive(password, a.salt);
-    }
-
     if (i >= 0)
         accounts_[i] = a;
     else
@@ -162,9 +141,12 @@ QString AccountStore::upsert(const QString &id, const QString &name,
     return QString();
 }
 
-QString AccountStore::remove(const QString &id)
+QString AccountStore::remove(const QString &phoneMask)
 {
-    const int i = indexOf(id);
+    // 按掩码删：界面上只有掩码（哈希不给 QML，少一处泄露面）。
+    // 掩码理论上可能重复（同前三位+同后四位），概率极低；真撞上就删到第一条，
+    // 管理员会看到列表没如期变化并重试 —— 不值得为此把哈希暴露给界面。
+    const int i = indexOfMask(phoneMask);
     if (i < 0)
         return QStringLiteral("账号不存在");
     if (accounts_.at(i).role == QLatin1String("super") && superCount() <= 1)
@@ -175,42 +157,41 @@ QString AccountStore::remove(const QString &id)
     return QString();
 }
 
-void AccountStore::migrateLegacyIfEmpty()
+void AccountStore::seedBuiltinsIfMissing()
 {
-    if (!accounts_.isEmpty())
-        return;
-    // 早先写在 MockData.qml 里的三个账号。沿用工号与姓名，密码统一 1234
-    //（用户 2026-08-21 定）—— 产线已经在用这几个工号，换掉等于要重新培训。
-    struct Legacy { const char *id; const char *name; const char *role; };
-    static const Legacy kLegacy[] = {
-        {"0045009", "马顺涛", "super"},
-        {"0038165", "肖洁", "engineer"},
-        {"9000001", "示例技术员", "tech"},
-    };
-    for (const Legacy &l : kLegacy) {
-        upsert(QString::fromUtf8(l.id), QString::fromUtf8(l.name),
-               QString::fromUtf8(l.role), QStringLiteral("1234"));
+    bool touched = false;
+    for (const Builtin &b : kBuiltins) {
+        const QString phone = QString::fromUtf8(b.phone);
+        if (indexOfHash(hashPhone(phone)) >= 0)
+            continue;                    // 已在表里（可能被改过姓名/角色，不动）
+        Account a;
+        a.phoneHash = hashPhone(phone);
+        a.phoneMask = maskPhone(phone);
+        a.name = QString::fromUtf8(b.name);
+        a.role = QString::fromUtf8(b.role);
+        accounts_.append(a);
+        touched = true;
     }
+    if (!touched)
+        return;
+    save();
+    emit accountsChanged();
 }
 
 void AccountStore::load()
 {
     QFile f(path_);
     if (!f.open(QIODevice::ReadOnly))
-        return;                      // 首次运行没有文件，不是错误
+        return;                          // 首次运行没有文件，不是错误
     const QJsonArray arr = QJsonDocument::fromJson(f.readAll()).array();
     for (const QJsonValue &v : arr) {
         const QJsonObject o = v.toObject();
         Account a;
-        a.id = o.value(QStringLiteral("id")).toString();
-        a.name = o.value(QStringLiteral("name")).toString();
+        a.phoneHash = o.value(QStringLiteral("phoneHash")).toString();
+        a.phoneMask = o.value(QStringLiteral("phoneMask")).toString();
         a.role = o.value(QStringLiteral("role")).toString();
-        a.salt = QByteArray::fromBase64(
-            o.value(QStringLiteral("salt")).toString().toLatin1());
-        a.hash = QByteArray::fromBase64(
-            o.value(QStringLiteral("hash")).toString().toLatin1());
-        if (!a.id.isEmpty() && RoleValid(a.role) && !a.salt.isEmpty()
-            && !a.hash.isEmpty())
+        a.name = o.value(QStringLiteral("name")).toString();
+        if (!a.phoneHash.isEmpty() && RoleValid(a.role))
             accounts_.append(a);
     }
 }
@@ -220,14 +201,13 @@ void AccountStore::save()
     QJsonArray arr;
     for (const Account &a : accounts_) {
         arr.append(QJsonObject{
-            {QStringLiteral("id"), a.id},
-            {QStringLiteral("name"), a.name},
+            {QStringLiteral("phoneHash"), a.phoneHash},
+            {QStringLiteral("phoneMask"), a.phoneMask},
             {QStringLiteral("role"), a.role},
-            {QStringLiteral("salt"), QString::fromLatin1(a.salt.toBase64())},
-            {QStringLiteral("hash"), QString::fromLatin1(a.hash.toBase64())},
+            {QStringLiteral("name"), a.name},
         });
     }
-    // QSaveFile：写一半断电不会留下损坏的 JSON —— 账号库损坏等于所有人登不进去
+    // QSaveFile：写一半断电不会留下损坏的 JSON —— 授权表损坏等于所有人登不进去
     QSaveFile f(path_);
     if (!f.open(QIODevice::WriteOnly))
         return;

@@ -70,6 +70,11 @@ QtObject {
     readonly property string button:   String.fromCharCode(0xE81D)  // 圆点
     readonly property string daynight: String.fromCharCode(0xE793)  // 亮度
     readonly property string person:   String.fromCharCode(0xE77B)
+    // 密码框"按住看明文"。两个码位都已验证在 Segoe Fluent Icons(Win11) 与
+    // Segoe MDL2 Assets(Win10) 中都有真实字形 —— 渲染成位图比过像素，不是只看
+    // MeasureString（那个在缺字时会回落到同宽替代框，探不出来）。见 README 第 6 条。
+    readonly property string eye:      String.fromCharCode(0xE7B3)
+    readonly property string eyeOff:   String.fromCharCode(0xED1A)
 
     // 测试项 bit → 图标
     function forItem(bit) {
