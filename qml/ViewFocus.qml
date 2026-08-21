@@ -34,6 +34,9 @@ Item {
     // 「复制全部」发回来，所以常驻不再是负担。
     readonly property bool showStreamDebug: true
 
+    // 跳台后跳过一次 IP 自动填充：那个 IP 可能是过时的，要让工人从搜索结果里选
+    property bool suppressIpAutofill: false
+
     // 设备 IP 输入框默认藏起来：IP 由设备上报自动带出，工人常态下不需要碰它。
     // 但**不能删** —— rtspUrl 是从它算出来的，而且设备端没有广播应答服务时
     // 搜索列表恒空，手填是唯一兜底（见 device_discovery.hpp 头注）。
@@ -89,8 +92,11 @@ Item {
         //    跳台后 ipField 里还是上一台的 IP，rtspUrl 也还是上一台的 —— 工人对着
         //    上一台的画面做判定，却把标识写到了下一台头上。
         //    清空后，新设备上报的 IpAddress 会自动带出（见 onInfoUpdated）。
-        if (root.rtspMode)
+        if (root.rtspMode) {
             ipField.text = "";
+            // 抑制紧接着那次 refreshInfo 的 IP 自动填充 —— 见 onInfoUpdated 里的说明
+            root.suppressIpAutofill = true;
+        }
 
         const next = Session.advanceStation("focus");
         if (next.length === 0)
@@ -99,32 +105,20 @@ Item {
         // ── 切完必须把流拉起来，否则"自动跳台"等于只换了个名字，画面是空的、
         //    还要工人再点一次「开始拉流」。两种模式路径不同：
         if (root.cloudMode) {
-            // 云：立刻建联。URL 就绪走 onLiveUrlReady 塞给 preview。
+            // 云：设备由 device_name 唯一确定，切完立刻建联，不需要工人再选什么。
+            // URL 就绪走 onLiveUrlReady 塞给 preview。
             root.startCloudStream();
         } else {
-            // RTSP：现在还不知道新设备的 IP —— advanceStation 里那次 refreshInfo()
-            // 的应答才带 IpAddress。所以只置个待办，等 onInfoUpdated 拿到 IP 再起播。
-            // 拿不到 IP（设备没上报）就退回搜索，见 autoStartTimeout。
-            root.pendingRtspAutoStart = true;
-            autoStartTimeout.restart();
-        }
-    }
-
-    // RTSP 跳台后的"等 IP 再起播"待办。设备上报里没有 IpAddress 时不能干等，
-    // 超时就自动起一轮搜索 —— 这才是你要的"跳到下个设备自动搜 IP"。
-    property bool pendingRtspAutoStart: false
-
-    Timer {
-        id: autoStartTimeout
-        interval: 4000
-        onTriggered: {
-            if (!root.pendingRtspAutoStart)
-                return;
-            root.pendingRtspAutoStart = false;
-            // 设备没报 IP：起一轮广播搜索，工人双击结果即可（pickDevice 会起播）
+            // RTSP：**不自动起播，起一轮搜索让工人选 IP**（2026-08-21 用户定）。
+            //
+            // 理由不是省事，是安全：RTSP 的目标由 IP 决定，而 IP 与 device_name 之间
+            // 没有可靠映射 —— 设备上报的 IpAddress 来自云端、可能是过时的（设备换过
+            // 网段/DHCP 续租/干脆是上一批那台的残留）。照它直接起播就可能把**另一台**
+            // 的画面摆到工人面前，而标识却写给当前 device_name —— 那是错判。
+            // 广播搜索的结果是当场确认可达的，工人双击选定即起播（pickDevice）。
             finder.clear();
             finder.start();
-            toast.show("新设备未上报 IP，已自动搜索 —— 双击结果开始拉流", true, 4000);
+            toast.show("已切到 " + next + " —— 请从搜索结果里选择该设备的 IP", true, 4000);
         }
     }
 
@@ -195,18 +189,18 @@ Item {
         function onInfoUpdated(info) {
             const hadIp = ipField.text.trim().length > 0;
             root.devInfo = info;
-            // IP 自动带出(设备上报);工人手填过就不覆盖
-            if (!hadIp && info.IpAddress !== undefined
-                && ("" + info.IpAddress).length > 0)
+            // IP 自动带出(设备上报);工人手填过就不覆盖。
+            // ⚠️ 跳台后这一次要跳过：那时 ipField 刚被清空（hadIp=false），而上报的
+            //    IpAddress 来自云端、可能是过时的。自动填上去，工人一按「开始拉流」
+            //    就可能拉到**另一台**的画面，标识却写给当前 device_name —— 错判。
+            //    跳台后的 IP 一律由工人从广播搜索结果里选（见 finishAndAdvance）。
+            if (root.suppressIpAutofill) {
+                root.suppressIpAutofill = false;
+            } else if (!hadIp && info.IpAddress !== undefined
+                       && ("" + info.IpAddress).length > 0) {
                 ipField.text = info.IpAddress;
-
-            // 跳台后在等 IP 起播：拿到了就立刻拉流（这一步是"自动跳台"的下半截，
-            // 少了它切完设备画面是空的，还得工人再点一次「开始拉流」）。
-            if (root.pendingRtspAutoStart && root.rtspUrl.length > 0) {
-                root.pendingRtspAutoStart = false;
-                autoStartTimeout.stop();
-                root.startRtspStream();
             }
+
             // ⚠️ 顺序要紧：**先校正进度，再跳台**。
             //    反过来写过一版，是"写完标识不跳台"的真因：finishAndAdvance() 已经
             //    把 CloudClient.deviceName 换成下一台，紧接着 syncFromDevice 却拿
