@@ -14,6 +14,7 @@
 #include <QStyleHints>
 
 #include <cstdio>
+#include <thread>
 
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -132,5 +133,25 @@ int main(int argc, char *argv[])
     if (engine.rootObjects().isEmpty())
         return -1;
 
-    return app.exec();
+    const int rc = app.exec();
+
+    // 退出兜底。事件循环已经结束，剩下的是引擎/单例析构 —— 那里任何一处卡住
+    // （libvlc 收线程、XP2P 卸 SDK、第三方 DLL 的 atexit）都会让进程留在后台，
+    // 表现就是"关了窗口任务管理器里还有一个"，还会锁住 exe 与日志文件，害得下次
+    // 构建/升级失败（2026-08-21 实测过一次真死锁：VlcStreamPlayer 析构里
+    // BlockingQueuedConnection 投给已被 aboutToQuit 收掉的控制线程）。
+    //
+    // 那个具体死锁已经修掉；这里是通用保险：给正常析构 3 秒，超时就硬退。
+    // 硬退安全 —— 现场状态（账号/进度/工厂配置）都是改一次立刻 QSaveFile 落盘，
+    // 没有"退出时才保存"的数据；日志是行缓冲 + 每行 fflush。
+    // 用裸系统线程而不是 QTimer：此刻事件循环已经没了，定时器不会触发。
+#ifdef Q_OS_WIN
+    std::thread([]() {
+        ::Sleep(3000);
+        std::fprintf(stderr, "[log] 析构超时，强制退出（避免残留进程锁住 exe/日志）\n");
+        std::fflush(stderr);
+        ::ExitProcess(0);
+    }).detach();
+#endif
+    return rc;
 }

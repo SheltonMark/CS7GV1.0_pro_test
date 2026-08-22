@@ -266,6 +266,13 @@ LumaProbe ProbeLuma(const std::uint8_t *y, const unsigned pitch,
 // libvlc 控制线程。new/play/stop 全都同步阻塞（首次 libvlc_new 扫插件缓存实测
 // 5-8 秒，player_stop 要等输入线程收尾），放 UI 线程就是"双击 IP 后软件假死"。
 // 全进程共用一条：libvlc 的控制调用本就该串行，多线程反而要自己加锁。
+// 控制线程是否已经收掉。**必须有这个标志**：aboutToQuit 在事件循环退出**之前**
+// 就把线程 quit+wait 掉了，而 QML 引擎析构 VlcStreamPlayer 发生在那之后 ——
+// 析构里的 BlockingQueuedConnection 于是投给一条没有事件循环的死线程，
+// 永远等不到返回：进程挂在析构上不退出（2026-08-21 实测：只要开过拉流页面，
+// 关窗口必留后台进程）。停了之后一律改走调用线程直接执行。
+bool g_controlStopped = false;
+
 QObject *controlHub()
 {
     static QThread *thread = [] {
@@ -274,6 +281,7 @@ QObject *controlHub()
         t->start();
         // 退出前收线程：线程还在跑就卸 DLL 会崩在 libvlc 内部
         QObject::connect(qApp, &QCoreApplication::aboutToQuit, t, [t] {
+            g_controlStopped = true;
             t->quit();
             t->wait(3000);
         });
@@ -290,6 +298,11 @@ QObject *controlHub()
 template <typename Fn>
 void postToControl(Fn &&fn)
 {
+    // 线程已收：直接在当前线程跑。投过去也没人执行，还会把待办丢掉。
+    if (g_controlStopped) {
+        fn();
+        return;
+    }
     QMetaObject::invokeMethod(controlHub(), std::forward<Fn>(fn),
                               Qt::QueuedConnection);
 }
@@ -308,7 +321,15 @@ VlcStreamPlayer::VlcStreamPlayer(QObject *parent)
 
 VlcStreamPlayer::~VlcStreamPlayer()
 {
-    // 必须**阻塞**等控制线程收完：libvlc 的视频回调把 this 当 opaque 用，
+    // ⚠️ 控制线程已经收掉时**绝不能**用 BlockingQueuedConnection —— 那条线程没有
+    //    事件循环，投过去永远不会被执行，调用方就永久阻塞在这里，进程退不掉
+    //    （2026-08-21 实测的"关窗口留后台进程"就是这个死锁）。
+    //    此时线程已 join，libvlc 回调不可能再跑，直接同步收尾是安全的。
+    if (g_controlStopped) {
+        teardownOnControl();
+        return;
+    }
+    // 线程还活着：必须**阻塞**等它收完 —— libvlc 的视频回调把 this 当 opaque 用，
     // player_stop 返回前回调仍可能在跑（碰 frame_mutex_/sink_）。异步收尾
     // 等于让回调打在已析构对象上。此处最多等一次 player_stop 的时长。
     QMetaObject::invokeMethod(controlHub(), [this] { teardownOnControl(); },

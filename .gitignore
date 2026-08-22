@@ -12,3 +12,8 @@ cloud_config.json
 accounts.json
 # 各工装卡的工位进度（现场运行态，换批次即失效）
 station_progress.json
+# 产品型号表（管理员在软件里增删，属现场配置）
+profiles.json
+# MSYS 删不掉被占用文件时留下的墓碑：rm -rf 撞上被锁的文件会把它改名成
+# .msys<hex> 并标记"重启后删除"。构建副产物，不该在 git status 里当未跟踪文件晃。
+.msys*
