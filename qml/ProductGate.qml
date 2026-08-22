@@ -393,7 +393,11 @@ Item {
             descF.text = p ? p.desc : "";
             pidF.text = p ? p.productId : "";
             enabledBox.checked = p ? p.enabled === true : true;
-            rtspBox.checked = p ? p.focusRtsp === true : false;
+            // 二选一：有网口走 RTSP，否则走云。新增默认云拉流 —— 新机型基本都是
+            // 无网口的（CS6G 之后），默认选常见的那个少点错。
+            const useRtsp = p ? p.focusRtsp === true : false;
+            rtspRadio.checked = useRtsp;
+            cloudRadio.checked = !useRtsp;
             const picked = {};
             const src = p ? p.items : [0, 2, 4, 5, 6, 7, 8, 9, 10];  // 新增默认给现有型号那套
             for (let i = 0; i < src.length; ++i)
@@ -415,7 +419,7 @@ Item {
                 desc: descF.text.trim(),
                 productId: pidF.text.trim(),
                 enabled: enabledBox.checked,
-                focusRtsp: rtspBox.checked,
+                focusRtsp: rtspRadio.checked,   // 二选一，另一个是云拉流
                 items: items,
                 // 工位序列沿用默认（现有两个型号完全一致）。要按型号改工位顺序是
                 // 另一件事，界面上先不开 —— 开了就得处理"工位 key 必须是已实现的
@@ -507,18 +511,56 @@ Item {
                 wrapMode: Text.WordWrap
             }
 
+            // 调焦拉流方式：全项目只有两种，二选一（用户 2026-08-21 定）。
+            // 早先是个叫"调焦可走 RTSP"的单勾选框，旁边还并排着一个语义完全无关的
+            // "可选"（其实是 enabled，管卡片能不能选）—— 两个混在一行，谁都看不懂。
+            Text {
+                Layout.fillWidth: true
+                text: "调焦工位的拉流方式"
+                color: Theme.textDim
+                font.family: TypeScale.family
+                font.pointSize: TypeScale.caption
+            }
             RowLayout {
                 Layout.fillWidth: true
-                spacing: Theme.s4
+                spacing: Theme.s5
 
-                CheckBox {
-                    id: enabledBox
-                    text: "可选（取消则卡片置灰）"
+                RadioButton {
+                    id: rtspRadio
+                    text: "RTSP 直拉（有网口）"
+                    // openFor 里按 profile.focusRtsp 回填
                 }
-                CheckBox {
-                    id: rtspBox
-                    text: "调焦可走 RTSP（有网口）"
+                RadioButton {
+                    id: cloudRadio
+                    text: "云拉流（无网口）"
                 }
+            }
+            Text {
+                Layout.fillWidth: true
+                text: rtspRadio.checked
+                      ? "裸机带网口，调焦工位用 IP 直连 RTSP；装壳后的工位一律走云。"
+                      : "本型号无网口（或调焦时已套壳），调焦也走云 —— 需要设备已联网上云。"
+                color: Theme.textSecondary
+                font.family: TypeScale.family
+                font.pointSize: TypeScale.caption
+                wrapMode: Text.WordWrap
+            }
+
+            // enabled 是另一回事：型号停产/未就绪时置灰，与拉流方式无关，
+            // 所以单独一行并写清后果。
+            CheckBox {
+                id: enabledBox
+                Layout.topMargin: Theme.s2
+                text: "在产品选择页可选"
+            }
+            Text {
+                Layout.fillWidth: true
+                visible: !enabledBox.checked
+                text: "取消后本型号的卡片会置灰、不能进入产测 —— 用于停产或还没准备好的型号。"
+                color: Theme.warn
+                font.family: TypeScale.family
+                font.pointSize: TypeScale.caption
+                wrapMode: Text.WordWrap
             }
 
             Text {

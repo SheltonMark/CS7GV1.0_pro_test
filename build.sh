@@ -88,6 +88,26 @@ for orphan in "$HERE"/dist.stage.*; do
     rm -rf "$orphan"
 done
 
+# MSYS 墓碑清理。rm -rf 撞上被占用的文件时，MSYS 会把它改名成 .msys<hex> 并标记
+# "重启后删除"，好让父目录看着是空的、流程能继续 —— 于是仓库根攒一堆这种目录。
+# 占用源通常是残留的 ProductTestTool 进程（关窗口不退出那个 bug，已修）。
+#
+# ⚠️ 两处不能省：
+#   || true  —— 墓碑本身就是"删不掉才产生的"，仍被占用时 rm 必然失败（实测
+#              Access is denied）。set -e 下不吞掉就会让整个构建挂在这里。
+#   2>/dev/null —— 删不掉是常态，不该每次构建都刷一屏错误。
+#              真的删不掉也无所谓：系统已排入删除队列，重启或占用者退出即消失。
+for tomb in "$HERE"/.msys*; do
+    [ -e "$tomb" ] || continue
+    rm -rf "$tomb" 2>/dev/null || true
+    # 用 if 而不是 `[ ] && echo || echo`：后者在 set -e 下语义微妙，本会话已踩过
+    if [ -e "$tomb" ]; then
+        echo "[build] 墓碑仍被占用，重启后自动消失: $(basename "$tomb")"
+    else
+        echo "[build] 已清理 MSYS 墓碑: $(basename "$tomb")"
+    fi
+done
+
 # 本次构建自己的收尾：正常路径在末尾 mv 走了就不剩东西，异常退出/被打断时
 # 靠这个 trap 兜住。EXIT 覆盖 return/exit，INT/TERM 覆盖 Ctrl-C 与被杀。
 trap 'rm -rf "$STAGE"' EXIT INT TERM
