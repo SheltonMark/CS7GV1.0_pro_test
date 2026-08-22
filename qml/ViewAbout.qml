@@ -297,7 +297,13 @@ Item {
                             onClicked: {
                                 switch (UpdateClient.state) {
                                 case UpdateClient.Available: UpdateClient.download(); break;
-                                case UpdateClient.Staged:    UpdateClient.apply(); break;
+                                case UpdateClient.Staged:
+                                    // ⚠️ 先收流再退出：libvlc / XP2P 的工作线程还活着
+                                    //    时进程可能赖着不退，安装脚本就等不到 exe
+                                    //    解锁（2026-08-21 实测卡死过）。
+                                    Xp2pClient.stop();
+                                    UpdateClient.apply();
+                                    break;
                                 default:                     UpdateClient.check(); break;
                                 }
                             }

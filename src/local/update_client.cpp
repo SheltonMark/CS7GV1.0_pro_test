@@ -14,6 +14,12 @@
 #include <QTextStream>
 #include <QThread>
 
+#include <thread>
+
+#ifdef Q_OS_WIN
+#include <windows.h>
+#endif
+
 #include "factory_config.hpp"
 #include "stream_log.hpp"
 
@@ -306,26 +312,81 @@ void UpdateClient::apply()
         return;
     }
     // 注意引号：安装路径可能带空格。脚本用 GBK 无所谓 —— 内容全 ASCII。
+    const QString exe = install + QStringLiteral("\\ProductTestTool.exe");
     QTextStream ts(&f);
+    // ⚠️ 等待判据是"exe 能不能被写"，**不是**"某个 PID 还在不在"。
+    //    早先按 PID 等，2026-08-21 实测卡死：机器上开了两个实例，脚本等的那个
+    //    PID 退了也没用（另一个照样锁着 exe），而且真出现过"点了安装但进程没退"，
+    //    脚本就在 :wait 里转到天荒地老、staged 永远拷不进去。
+    //    `2>nul (>>"file" call )` 是 cmd 里探文件是否被占用的标准手法：以追加方式
+    //    打开但不写入，成功即说明没人锁着。
+    //    再加 60 秒上限：宁可报错让人处理，也不要静默卡住。
     ts << "@echo off\r\n"
        << "title ProductTestTool update\r\n"
-       << "echo Updating... app will RESTART AUTOMATICALLY.\r\n"
-       << "echo Do NOT start it manually.\r\n"
-       << "echo waiting for app to exit...\r\n"
+       << "echo Updating to v" << remote_version_ << " ...\r\n"
+       << "echo The app will RESTART AUTOMATICALLY - do NOT start it manually.\r\n"
+       << "set /a tries=0\r\n"
        << ":wait\r\n"
-       << "tasklist /FI \"PID eq " << pid << "\" 2>nul | find \"" << pid
-       << "\" >nul && (ping -n 2 127.0.0.1 >nul & goto wait)\r\n"
-       << "echo applying update...\r\n"
-       << "xcopy /E /Y /Q \"" << staging << "\\*\" \"" << install << "\\\" >nul\r\n"
+       << "2>nul (>>\"" << exe << "\" call ) && goto ready\r\n"
+       << "set /a tries+=1\r\n"
+       << "if %tries% GEQ 60 goto locked\r\n"
+       << "echo waiting for the app to close... (%tries%/60)\r\n"
+       << "ping -n 2 127.0.0.1 >nul\r\n"
+       << "goto wait\r\n"
+       << ":ready\r\n"
+       << "echo applying files...\r\n"
+       << "xcopy /E /Y /Q \"" << staging << "\\*\" \"" << install << "\\\"\r\n"
+       << "if errorlevel 1 goto copyfail\r\n"
        << "rd /S /Q \"" << staging << "\"\r\n"
        << "echo done, restarting...\r\n"
-       << "start \"\" \"" << install << "\\ProductTestTool.exe\"\r\n"
-       << "del \"%~f0\"\r\n";
+       << "start \"\" \"" << exe << "\"\r\n"
+       << "del \"%~f0\"\r\n"
+       << "exit /b 0\r\n"
+       // 失败分支都停住给人看 —— 静默失败比报错难查得多（这次就是）
+       << ":locked\r\n"
+       << "echo.\r\n"
+       << "echo FAILED: the app is still running and locks the exe.\r\n"
+       << "echo Close ALL ProductTestTool windows, then run this script again:\r\n"
+       << "echo   " << script << "\r\n"
+       << "pause\r\n"
+       << "exit /b 1\r\n"
+       << ":copyfail\r\n"
+       << "echo.\r\n"
+       << "echo FAILED to copy files. The update is kept at:\r\n"
+       << "echo   " << staging << "\r\n"
+       << "echo Close the app and run this script again.\r\n"
+       << "pause\r\n"
+       << "exit /b 1\r\n";
     f.close();
 
-    StreamLog::append(QStringLiteral("[升级] 退出并安装 v%1").arg(remote_version_));
-    QProcess::startDetached(QStringLiteral("cmd.exe"),
-                            {QStringLiteral("/c"), script},
-                            install);
+    // ⚠️ 必须查 startDetached 的返回值。早先不查，2026-08-21 实测出现"日志说
+    //    已退出安装、脚本也写好了，但黑窗没出现、进程还在" —— 无从判断是脚本没
+    //    启动还是没退出，白查一轮。
+    qint64 childPid = 0;
+    const bool spawned = QProcess::startDetached(
+        QStringLiteral("cmd.exe"), {QStringLiteral("/c"), script}, install, &childPid);
+    if (!spawned) {
+        StreamLog::append(QStringLiteral("[升级] 启动安装脚本失败 —— 手动双击运行：%1")
+                              .arg(script));
+        setState(Error, QStringLiteral(
+            "启动安装脚本失败。请关闭软件后手动双击运行：\n%1").arg(script));
+        return;                     // 不退出 —— 退了工人就看不到这条提示
+    }
+    StreamLog::append(QStringLiteral("[升级] 安装脚本已启动 pid=%1，本进程退出安装 v%2")
+                          .arg(childPid).arg(remote_version_));
+
+    // 退出。⚠️ 不能只调 quit()：实测（2026-08-21）日志都打到"退出并安装"了，
+    //    进程却一直活着 —— libvlc / XP2P 的工作线程会把退出拖死（要么事件循环
+    //    没停，要么停了卡在析构 join），脚本在 :wait 里等 exe 解锁等不到。
+    //    兜底不能用 QTimer —— 它依赖事件循环，而卡死的可能恰恰是循环退出后的
+    //    析构阶段。用系统级线程：睡 1.5 秒还活着就 ExitProcess 硬退。
+    //    硬退是安全的：现场状态（账号/进度/配置）都是改一次立刻落盘（QSaveFile），
+    //    没有"退出时才保存"的数据；正常退出赢了这场竞赛的话，线程随进程消失。
     QCoreApplication::quit();
+#ifdef Q_OS_WIN
+    std::thread([]() {
+        ::Sleep(1500);
+        ::ExitProcess(0);
+    }).detach();
+#endif
 }
