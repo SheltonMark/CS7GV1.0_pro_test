@@ -165,7 +165,7 @@ void CloudClient::refreshDevices()
 
         // 按 deviceName 升序编卡号：卡号要稳定，云端返回顺序不保证。
         QStringList names;
-        QHash<QString, bool> onlineOf;
+        QHash<QString, int> statusOf;
         const QJsonArray arr = reply.data.value(QStringLiteral("devices")).toArray();
         for (const QJsonValue &v : arr) {
             const QJsonObject d = v.toObject();
@@ -173,7 +173,9 @@ void CloudClient::refreshDevices()
             if (n.isEmpty())
                 continue;
             names.append(n);
-            onlineOf.insert(n, d.value(QStringLiteral("online")).toBool());
+            // Mock 名单没有 status：由旧 online 字段推导在线/离线。
+            const int fallback = d.value(QStringLiteral("online")).toBool() ? 1 : 0;
+            statusOf.insert(n, d.value(QStringLiteral("status")).toInt(fallback));
         }
         names.sort();
 
@@ -181,12 +183,14 @@ void CloudClient::refreshDevices()
         int card = 1;
         int onlineCount = 0;
         for (const QString &n : names) {
-            const bool on = onlineOf.value(n);
+            const int status = statusOf.value(n, 2);
+            const bool on = status == 1;
             if (on)
                 ++onlineCount;
             out.append(QVariantMap{
                 {QStringLiteral("card"), card++},
                 {QStringLiteral("deviceName"), n},
+                {QStringLiteral("status"), status},
                 {QStringLiteral("online"), on},
             });
         }

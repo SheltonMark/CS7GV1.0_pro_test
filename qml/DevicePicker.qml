@@ -152,7 +152,9 @@ Item {
 
                     readonly property bool isCurrent:
                         modelData.deviceName === CloudClient.deviceName
-                    readonly property bool isOnline: modelData.online === true
+                    readonly property int deviceStatus:
+                        Number.isInteger(modelData.status) ? modelData.status : 2
+                    readonly property bool isOnline: deviceStatus === 1
                     readonly property bool stationDone:
                         root.progressTick >= 0        // 依赖它以便进度变化时重算
                         && root.station.length > 0
@@ -193,8 +195,13 @@ Item {
                         }
 
                         Text {
-                            text: row.isOnline ? "在线" : "离线"
-                            color: row.isOnline ? Theme.pass : Theme.textDim
+                            text: row.deviceStatus === 1 ? "在线"
+                                  : row.deviceStatus === 0 ? "离线"
+                                  : row.deviceStatus === 3 ? "未激活"
+                                  : "状态未知"
+                            color: row.deviceStatus === 1 ? Theme.pass
+                                   : row.deviceStatus === 3 ? Theme.warn
+                                   : Theme.textDim
                             font.family: TypeScale.family
                             font.pointSize: TypeScale.caption
                         }
@@ -281,7 +288,13 @@ Item {
         if (!d)
             return false;
         if (d.online !== true) {
-            root.message("该设备离线，先确认工装卡已插好、设备已上电", false);
+            const status = Number.isInteger(d.status) ? d.status : 2;
+            if (status === 3)
+                root.message("该设备从未激活过 —— 检查三元组是否已写入、写对", false);
+            else if (status === 2)
+                root.message("暂时无法获取该设备状态，请刷新名单或检查云 API", false);
+            else
+                root.message("该设备离线，先确认工装卡已插好、设备已上电", false);
             return false;
         }
         if (d.deviceName === CloudClient.deviceName)

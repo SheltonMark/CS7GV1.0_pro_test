@@ -1,14 +1,17 @@
 #include "tencent_api_transport.hpp"
 
 #include <QDateTime>
+#include <QDebug>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QUrl>
 
+#include "device_status.hpp"
 #include "tc3_signer.hpp"
 
+#include <memory>
 #include <utility>
 
 namespace {
@@ -108,35 +111,83 @@ void TencentApiTransport::readDeviceData(const QString &productId, const QString
 
 void TencentApiTransport::describeDevices(const QString &productId, CloudReplyHandler done)
 {
-    // 产线一次最多十几台工装卡，一页足够。Limit 上限 100（云 API 约定），
-    // 真超了再补分页 —— 现在补等于写不会被执行的代码。
+    // DescribeDevices 的 DeviceInfo.Status 实测恒为 null；腾讯云控制台显示的实时状态
+    // 来自单台 DescribeDevice。先拿名单，再并发补状态，避免十几台串行累加延迟。
     const QJsonObject params{
         {QStringLiteral("ProductId"), productId},
         {QStringLiteral("Offset"), 0},
         {QStringLiteral("Limit"), 100},
     };
     post(QStringLiteral("DescribeDevices"), params,
-         [done](const CloudReply &reply) {
+         [this, productId, done = std::move(done)](const CloudReply &reply) mutable {
              if (!reply.ok) {
                  done(reply);
                  return;
              }
-             // 应答形状：{ "Devices": [ {"DeviceName":…, "Status": 0|1, …} ], "Total": n }
-             // Status 1=在线 0=离线（腾讯 IoT Explorer 约定）。
-             QJsonArray out;
+
+             QStringList names;
              const QJsonArray devices =
                  reply.data.value(QStringLiteral("Devices")).toArray();
-             for (const QJsonValue &v : devices) {
-                 const QJsonObject d = v.toObject();
-                 const QString name = d.value(QStringLiteral("DeviceName")).toString();
-                 if (name.isEmpty())
-                     continue;
-                 out.append(QJsonObject{
-                     {QStringLiteral("deviceName"), name},
-                     {QStringLiteral("online"),
-                      d.value(QStringLiteral("Status")).toInt() == 1},
-                 });
+             for (const QJsonValue &value : devices) {
+                 const QString name = value.toObject()
+                                          .value(QStringLiteral("DeviceName"))
+                                          .toString();
+                 if (!name.isEmpty())
+                     names.append(name);
              }
-             done(CloudReply::success(QJsonObject{{QStringLiteral("devices"), out}}));
+             if (names.isEmpty()) {
+                 done(CloudReply::success(
+                     QJsonObject{{QStringLiteral("devices"), QJsonArray()}}));
+                 return;
+             }
+
+             struct PendingRoster {
+                 QStringList names;
+                 QHash<QString, int> statusOf;
+                 int remaining {0};
+                 CloudReplyHandler done;
+             };
+             const auto pending = std::make_shared<PendingRoster>();
+             pending->names = names;
+             pending->remaining = names.size();
+             pending->done = std::move(done);
+
+             for (const QString &name : names) {
+                 const QJsonObject deviceParams{
+                     {QStringLiteral("ProductId"), productId},
+                     {QStringLiteral("DeviceName"), name},
+                 };
+                 post(QStringLiteral("DescribeDevice"), deviceParams,
+                      [pending, name](const CloudReply &deviceReply) {
+                          int status = kDeviceStatusUnknown;
+                          if (deviceReply.ok) {
+                              const QJsonObject device =
+                                  deviceReply.data.value(QStringLiteral("Device")).toObject();
+                              status = normalizeTencentDeviceStatus(
+                                  device.value(QStringLiteral("Status")));
+                          } else {
+                              qWarning().noquote()
+                                  << QStringLiteral("DescribeDevice %1 失败: %2")
+                                         .arg(name, deviceReply.error);
+                          }
+                          pending->statusOf.insert(name, status);
+                          if (--pending->remaining != 0)
+                              return;
+
+                          QJsonArray out;
+                          for (const QString &deviceName : pending->names) {
+                              const int deviceStatus = pending->statusOf.value(
+                                  deviceName, kDeviceStatusUnknown);
+                              out.append(QJsonObject{
+                                  {QStringLiteral("deviceName"), deviceName},
+                                  {QStringLiteral("status"), deviceStatus},
+                                  {QStringLiteral("online"),
+                                   deviceStatus == kDeviceStatusOnline},
+                              });
+                          }
+                          pending->done(CloudReply::success(
+                              QJsonObject{{QStringLiteral("devices"), out}}));
+                      });
+             }
          });
 }

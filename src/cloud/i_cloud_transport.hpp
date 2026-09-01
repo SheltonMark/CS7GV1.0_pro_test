@@ -18,10 +18,12 @@
 //     { "<PropertyId>": {"Value": <值>, "LastUpdate": <ms>}, ... }
 //   与腾讯 DescribeDeviceData 的 Data 字段同构；Mock 也产出同一形状，
 //   这样轮询代码对两种传输一字不改。
-// - describeDevices：列该产品下的设备名单 + 在线状态。data 规格化为
-//     { "devices": [ {"deviceName": "...", "online": true|false}, ... ] }
-//   ⚠️ 在线状态**必须走这个接口**，不要沿用 readDeviceData 那套"读心跳属性再
-//   算年龄"：那是单设备的判据，10 台就要 10 次调用；而这个接口一次返回全部。
+// - describeDevices：列该产品下的设备名单 + 实时状态。data 规格化为
+//     { "devices": [ {"deviceName": "...", "status": 0|1|2|3,
+//                       "online": true|false}, ... ] }
+//   status：0=离线、1=在线、2=状态未知、3=未激活。online 是兼容上层流程的派生值。
+//   腾讯 DescribeDevices 只负责拿名单（其 Status 实测为 null），实现层会并发调用
+//   DescribeDevice 补齐每台状态；不要用 readDeviceData 的心跳年龄冒充云端在线状态。
 class ICloudTransport {
 public:
     virtual ~ICloudTransport() = default;

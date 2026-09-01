@@ -5,9 +5,11 @@ cmake_minimum_required(VERSION 3.21)
 #
 # 版本号是产线工具的硬要求：界面要看得到，将来每条产测记录也要带上它，
 # 否则批量误判无法追溯是哪个版本干的。此处是唯一来源。
-project(ptest_pc_client VERSION 0.1.16 LANGUAGES CXX)
+project(ptest_pc_client VERSION 0.1.18 LANGUAGES CXX)
 
 find_package(Qt6 6.7 REQUIRED COMPONENTS Quick QuickControls2 Network Multimedia)
+
+include(CTest)
 
 qt_standard_project_setup(REQUIRES 6.7)
 
@@ -163,6 +165,8 @@ qt_add_qml_module(app_ptest
         src/cloud/mock_transport.cpp
         src/cloud/tencent_api_transport.hpp
         src/cloud/tencent_api_transport.cpp
+        src/cloud/device_status.hpp
+        src/cloud/device_status.cpp
         # 云拉流的票据来源：腾达后台取 xp2p_info（XP2P SDK 自取那条路走不通，
         # 详见 src/cloud/tenda_cloud_client.hpp 顶部）
         src/cloud/tenda_cloud_client.hpp
@@ -197,3 +201,12 @@ set_target_properties(app_ptest PROPERTIES
     OUTPUT_NAME "ProductTestTool")
 
 install(TARGETS app_ptest RUNTIME DESTINATION .)
+
+if(BUILD_TESTING)
+    add_executable(device_status_test
+        test/device_status_test.cpp
+        src/cloud/device_status.cpp)
+    target_include_directories(device_status_test PRIVATE src/cloud)
+    target_link_libraries(device_status_test PRIVATE Qt6::Core)
+    add_test(NAME device_status_test COMMAND device_status_test)
+endif()
